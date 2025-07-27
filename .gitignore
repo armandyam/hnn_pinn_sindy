@@ -30,7 +30,6 @@ MANIFEST
 data/
 models/saved/
 results/
-plots/
 
 # Jupyter Notebook
 .ipynb_checkpoints
