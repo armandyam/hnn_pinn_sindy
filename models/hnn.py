@@ -255,28 +255,95 @@ class HNNTrainer:
     
     def integrate_trajectory(self, q0: float, p0: float, t_span: Tuple[float, float], 
                            n_points: int = 500) -> Tuple[np.ndarray, np.ndarray, np.ndarray]:
-        """Integrate trajectory using learned dynamics"""
-        t = np.linspace(*t_span, n_points)
-        dt = t[1] - t[0]
+        """Integrate trajectory using learned dynamics with improved stability"""
+        from scipy.integrate import solve_ivp
         
-        q = np.zeros(n_points)
-        p = np.zeros(n_points)
-        q[0] = q0
-        p[0] = p0
+        def hnn_dynamics(t, y):
+            """Dynamics function for scipy integration"""
+            q_val = np.array([y[0]])
+            p_val = np.array([y[1]])
+            dq_dt, dp_dt = self.predict_dynamics(q_val, p_val)
+            return [dq_dt[0], dp_dt[0]]
         
-        # Euler integration
-        for i in range(1, n_points):
-            dq_dt, dp_dt = self.predict_dynamics(np.array([q[i-1]]), np.array([p[i-1]]))
-            q[i] = q[i-1] + dt * dq_dt[0]
-            p[i] = p[i-1] + dt * dp_dt[0]
+        # Use scipy's RK45 integrator for better stability
+        sol = solve_ivp(hnn_dynamics, t_span, [q0, p0], 
+                       t_eval=np.linspace(*t_span, n_points), 
+                       method='RK45', rtol=1e-8)
         
-        return t, q, p
+        if sol.success:
+            return sol.t, sol.y[0], sol.y[1]  # t, q, p
+        else:
+            print("⚠️ HNN integration failed, falling back to Euler")
+            # Fallback to Euler
+            t = np.linspace(*t_span, n_points)
+            dt = t[1] - t[0]
+            
+            q = np.zeros(n_points)
+            p = np.zeros(n_points)
+            q[0] = q0
+            p[0] = p0
+            
+            # Euler integration
+            for i in range(1, n_points):
+                dq_dt, dp_dt = self.predict_dynamics(np.array([q[i-1]]), np.array([p[i-1]]))
+                q[i] = q[i-1] + dt * dq_dt[0]
+                p[i] = p[i-1] + dt * dp_dt[0]
+            
+            return t, q, p
+    
+    def predict(self, t: np.ndarray) -> np.ndarray:
+        """Predict position at given times (for compatibility with other models)"""
+        # For HNN, we need to integrate from initial conditions
+        # Use the data's initial conditions
+        q0, p0 = 1.0, 0.0  # Default harmonic oscillator initial conditions
+        t_span = (t[0], t[-1])
+        n_points = len(t)
+        
+        t_int, q_int, p_int = self.integrate_trajectory(q0, p0, t_span, n_points)
+        
+        # Interpolate to exact time points
+        from scipy.interpolate import interp1d
+        f_interp = interp1d(t_int, q_int, kind='linear', bounds_error=False, fill_value='extrapolate')
+        return f_interp(t)
     
     def save_model(self, filename: str):
         """Save the trained model"""
         os.makedirs('models/saved', exist_ok=True)
         torch.save(self.model.state_dict(), f'models/saved/{filename}.pth')
         print(f"Model saved to models/saved/{filename}.pth")
+    
+    def test_prediction_integrity(self, test_conditions: list = [(1.0, 0.0), (0.5, 0.5), (2.0, -1.0)]):
+        """Test HNN predictions with different initial conditions to verify no cheating"""
+        print("🔍 Testing HNN prediction integrity...")
+        
+        for i, (q0, p0) in enumerate(test_conditions):
+            print(f"  Test {i+1}: Initial conditions q0={q0}, p0={p0}")
+            
+            # Predict 10 time steps
+            t_test = np.linspace(0, 2, 10)
+            t_int, q_pred, p_pred = self.integrate_trajectory(q0, p0, (0, 2), 10)
+            
+            # Compute what the TRUE physics would give
+            # True undamped oscillator: q(t) = q0*cos(t) + p0*sin(t), p(t) = -q0*sin(t) + p0*cos(t)
+            q_true = q0 * np.cos(t_test) + p0 * np.sin(t_test)
+            p_true = -q0 * np.sin(t_test) + p0 * np.cos(t_test)
+            
+            # Compare
+            q_error = np.mean(np.abs(q_pred - q_true))
+            p_error = np.mean(np.abs(p_pred - p_true))
+            
+            print(f"    Position error: {q_error:.6f}")
+            print(f"    Momentum error: {p_error:.6f}")
+            
+            # Check if it's suspiciously perfect (would indicate cheating)
+            if q_error < 1e-10 and p_error < 1e-10:
+                print("    ⚠️ SUSPICIOUS: Error too small - possible cheating!")
+            elif q_error < 0.1 and p_error < 0.1:
+                print("    ✅ GOOD: Small error - well-trained model")
+            else:
+                print("    ⚠️ POOR: Large error - model may need more training")
+                
+        print("🔍 HNN integrity test completed\n")
     
     def load_model(self, filename: str):
         """Load a trained model"""

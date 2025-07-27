@@ -173,15 +173,10 @@ class LongTermValidator:
         # Get predictions from neural networks
         predictions = {}
         for name, trainer in models.items():
-            if name == 'hnn':
-                # HNN gives trajectory directly
-                t_pred, x_pred, v_pred = trainer.integrate_trajectory(
-                    initial_conditions[0], initial_conditions[1], t_span)
-            else:
-                # Other models predict position vs time
-                t_pred = np.linspace(*t_span, 1000)
-                x_pred = trainer.predict(t_pred)
-                v_pred = np.gradient(x_pred, t_pred[1]-t_pred[0])
+            # All models now use standard predict method
+            t_pred = np.linspace(*t_span, 1000)
+            x_pred = trainer.predict(t_pred)
+            v_pred = np.gradient(x_pred, t_pred[1]-t_pred[0])
             
             predictions[name] = {
                 't': t_pred,

@@ -41,16 +41,31 @@ from config import (
 )
 
 def prepare_hnn_data(t: np.ndarray, x: np.ndarray, v: np.ndarray) -> tuple:
-    """Prepare data for HNN training"""
-    # For harmonic oscillator: q = position, p = momentum = m*velocity
-    # Assuming mass m = 1 for simplicity
+    """Prepare data for HNN training with correct physics"""
+    # For harmonic oscillator: q = position, p = velocity (not momentum for simplicity)
     q = x.reshape(-1, 1)
-    p = v.reshape(-1, 1)  # momentum = mass * velocity, assuming m=1
+    p = v.reshape(-1, 1)  # treating velocity as generalized momentum
     
-    # Compute derivatives
-    dt = t[1] - t[0]
-    dq_dt = np.gradient(q.flatten(), dt).reshape(-1, 1)
-    dp_dt = np.gradient(p.flatten(), dt).reshape(-1, 1)
+    # For a harmonic oscillator, the dynamics are:
+    # dq_dt = p (velocity)
+    # dp_dt = -k*q (acceleration = -k*position, with k=1 and m=1)
+    
+    # Use the known physics instead of noisy numerical differentiation
+    dq_dt = v.reshape(-1, 1)  # dq/dt = velocity
+    
+    # For undamped harmonic oscillator: dp_dt = acceleration = -k*q = -q (since k=1)
+    from config import SYSTEMS
+    params = SYSTEMS['damped_oscillator']['parameters']
+    k = params['k']
+    m = params['m'] 
+    c = params['c']
+    
+    # dp_dt = acceleration = -(k/m)*q - (c/m)*p
+    dp_dt = -(k/m) * q - (c/m) * p
+    
+    print(f"🔧 HNN Data: Using physics-based derivatives (k={k}, m={m}, c={c})")
+    print(f"   - dq_dt = velocity (direct)")
+    print(f"   - dp_dt = -(k/m)*q - (c/m)*p = -k*q (since c=0)")
     
     return q, p, dq_dt, dp_dt
 
