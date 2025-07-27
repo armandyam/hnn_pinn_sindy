@@ -110,54 +110,52 @@ class HNNTrainer:
         self.val_losses = []
         self.energy_losses = []
     
-    def train(self, q_data: np.ndarray, p_data: np.ndarray, 
-              dq_dt_data: np.ndarray, dp_dt_data: np.ndarray,
-              epochs: int = 1000, val_split: float = 0.2) -> Dict[str, list]:
-        """Train the HNN"""
-        
+    def train(self, q: np.ndarray, p: np.ndarray, dq_dt: np.ndarray, dp_dt: np.ndarray,
+              epochs: int = 1000, val_split: float = 0.2, verbose: bool = True):
+        """Train HNN with early stopping"""
         # Convert to tensors
-        q_tensor = torch.FloatTensor(q_data.reshape(-1, 1))
-        p_tensor = torch.FloatTensor(p_data.reshape(-1, 1))
-        dq_dt_tensor = torch.FloatTensor(dq_dt_data.reshape(-1, 1))
-        dp_dt_tensor = torch.FloatTensor(dp_dt_data.reshape(-1, 1))
+        q_tensor = torch.FloatTensor(q.reshape(-1, 1))
+        p_tensor = torch.FloatTensor(p.reshape(-1, 1))
+        dq_dt_tensor = torch.FloatTensor(dq_dt.reshape(-1, 1))
+        dp_dt_tensor = torch.FloatTensor(dp_dt.reshape(-1, 1))
         
-        # Split into train/val
-        n_train = int(len(q_data) * (1 - val_split))
-        q_train = q_tensor[:n_train]
-        p_train = p_tensor[:n_train]
-        dq_dt_train = dq_dt_tensor[:n_train]
-        dp_dt_train = dp_dt_tensor[:n_train]
+        # Split data
+        n_val = int(len(q) * val_split)
+        indices = np.random.permutation(len(q))
         
-        q_val = q_tensor[n_train:]
-        p_val = p_tensor[n_train:]
-        dq_dt_val = dq_dt_tensor[n_train:]
-        dp_dt_val = dp_dt_tensor[n_train:]
+        train_indices = indices[n_val:]
+        val_indices = indices[:n_val]
         
-        # Set requires_grad for training tensors
-        q_train.requires_grad_(True)
-        p_train.requires_grad_(True)
+        q_train, p_train = q_tensor[train_indices], p_tensor[train_indices]
+        dq_dt_train, dp_dt_train = dq_dt_tensor[train_indices], dp_dt_tensor[train_indices]
         
-        # Set requires_grad for validation tensors
-        q_val.requires_grad_(True)
-        p_val.requires_grad_(True)
+        q_val, p_val = q_tensor[val_indices], p_tensor[val_indices]
+        dq_dt_val, dp_dt_val = dq_dt_tensor[val_indices], dp_dt_tensor[val_indices]
         
-        print("Training Hamiltonian Neural Network...")
+        # Early stopping parameters
+        best_val_loss = float('inf')
+        patience = 500  # Stop if no improvement for 500 epochs
+        patience_counter = 0
+        best_model_state = None
         
         for epoch in range(epochs):
             # Training
             self.model.train()
             self.optimizer.zero_grad()
             
-            # Predict dynamics
-            dq_dt_pred, dp_dt_pred = self.model.get_dynamics(q_train, p_train)
+            # Set requires_grad for computing derivatives
+            q_train.requires_grad = True
+            p_train.requires_grad = True
+            
+            # Predict Hamiltonian derivatives
+            predicted_dq_dt, predicted_dp_dt = self.model.get_dynamics(q_train, p_train)
             
             # Dynamics loss
-            dynamics_loss = torch.mean((dq_dt_pred - dq_dt_train)**2 + 
-                                     (dp_dt_pred - dp_dt_train)**2)
+            dynamics_loss = (nn.MSELoss()(predicted_dq_dt, dq_dt_train) + 
+                           nn.MSELoss()(predicted_dp_dt, dp_dt_train))
             
             # Energy conservation loss
-            H_values = self.model(q_train, p_train)
-            energy_loss = torch.var(H_values)  # Variance should be small for conservation
+            energy_loss = self.compute_energy_loss(q_train, p_train)
             
             # Total loss
             total_loss = dynamics_loss + self.energy_weight * energy_loss
@@ -171,24 +169,40 @@ class HNNTrainer:
             
             # Validation
             self.model.eval()
-            dq_dt_val_pred, dp_dt_val_pred = self.model.get_dynamics(q_val, p_val)
-            val_loss = torch.mean((dq_dt_val_pred - dq_dt_val)**2 + 
-                                (dp_dt_val_pred - dp_dt_val)**2)
+            with torch.no_grad():
+                # For validation, we need gradients enabled for get_dynamics
+                q_val_grad = q_val.clone().detach().requires_grad_(True)
+                p_val_grad = p_val.clone().detach().requires_grad_(True)
+                
+                # Temporarily enable gradients for dynamics computation
+                with torch.enable_grad():
+                    val_dq_dt, val_dp_dt = self.model.get_dynamics(q_val_grad, p_val_grad)
+                
+                val_loss = (nn.MSELoss()(val_dq_dt, dq_dt_val) + 
+                           nn.MSELoss()(val_dp_dt, dp_dt_val))
             
+            # Store losses
             self.train_losses.append(dynamics_loss.item())
             self.val_losses.append(val_loss.item())
             self.energy_losses.append(energy_loss.item())
             
-            if epoch % 100 == 0:
-                print(f"Epoch {epoch}: Dynamics Loss = {dynamics_loss.item():.6f}, "
-                      f"Energy Loss = {energy_loss.item():.6f}, "
-                      f"Val Loss = {val_loss.item():.6f}")
-        
-        return {
-            'train_losses': self.train_losses,
-            'val_losses': self.val_losses,
-            'energy_losses': self.energy_losses
-        }
+            # Early stopping check
+            if val_loss.item() < best_val_loss:
+                best_val_loss = val_loss.item()
+                patience_counter = 0
+                best_model_state = self.model.state_dict().copy()
+            else:
+                patience_counter += 1
+            
+            # Stop if validation loss hasn't improved
+            if patience_counter >= patience:
+                print(f"Early stopping at epoch {epoch}, best val loss: {best_val_loss:.6f}")
+                # Restore best model
+                self.model.load_state_dict(best_model_state)
+                break
+            
+            if verbose and epoch % 100 == 0:
+                print(f"Epoch {epoch}: Dynamics Loss = {dynamics_loss.item():.6f}, Energy Loss = {energy_loss.item():.6f}, Val Loss = {val_loss.item():.6f}")
     
     def predict_dynamics(self, q: np.ndarray, p: np.ndarray) -> Tuple[np.ndarray, np.ndarray]:
         """Predict dynamics for given q, p"""
@@ -301,7 +315,12 @@ class HNNTrainer:
             plt.savefig('plots/hnn_training.png', dpi=300, bbox_inches='tight')
             print("Training plot saved to plots/hnn_training.png")
         
-        plt.show()
+        # plt.show()
+
+    def compute_energy_loss(self, q: torch.Tensor, p: torch.Tensor) -> torch.Tensor:
+        """Compute energy conservation loss"""
+        H_values = self.model(q, p)
+        return torch.var(H_values)  # Variance should be small for conservation
 
 def prepare_hnn_data(t_data: np.ndarray, x_data: np.ndarray, v_data: np.ndarray) -> Tuple[np.ndarray, ...]:
     """Prepare data for HNN training by computing derivatives"""
@@ -364,7 +383,7 @@ def main():
     plt.grid(True, alpha=0.3)
     
     plt.tight_layout()
-    plt.show()
+    # plt.show()
 
 if __name__ == "__main__":
     main() 

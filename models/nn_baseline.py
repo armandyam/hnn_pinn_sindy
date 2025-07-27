@@ -69,32 +69,38 @@ class BaselineTrainer:
         self.train_losses = []
         self.val_losses = []
     
-    def train(self, t_data: np.ndarray, x_data: np.ndarray, 
-              epochs: int = 1000, val_split: float = 0.2) -> Dict[str, list]:
-        """Train the baseline neural network"""
+    def train(self, t: np.ndarray, x: np.ndarray, epochs: int = 1000, 
+              val_split: float = 0.2, verbose: bool = True):
+        """Train the baseline neural network with early stopping"""
+        # Prepare data
+        t_tensor = torch.FloatTensor(t.reshape(-1, 1))
+        x_tensor = torch.FloatTensor(x.reshape(-1, 1))
         
-        # Convert to tensors
-        t_tensor = torch.FloatTensor(t_data.reshape(-1, 1))
-        x_tensor = torch.FloatTensor(x_data.reshape(-1, 1))
+        # Split data
+        n_val = int(len(t) * val_split)
+        indices = np.random.permutation(len(t))
         
-        # Split into train/val
-        n_train = int(len(t_data) * (1 - val_split))
-        t_train = t_tensor[:n_train]
-        x_train = x_tensor[:n_train]
-        t_val = t_tensor[n_train:]
-        x_val = x_tensor[n_train:]
+        train_indices = indices[n_val:]
+        val_indices = indices[:n_val]
         
-        print("Training baseline neural network...")
+        t_train, x_train = t_tensor[train_indices], x_tensor[train_indices]
+        t_val, x_val = t_tensor[val_indices], x_tensor[val_indices]
+        
+        # Early stopping parameters
+        best_val_loss = float('inf')
+        patience = 500  # Stop if no improvement for 500 epochs
+        patience_counter = 0
+        best_model_state = None
         
         for epoch in range(epochs):
             # Training
             self.model.train()
             self.optimizer.zero_grad()
             
-            x_pred = self.model(t_train)
-            train_loss = self.criterion(x_pred, x_train)
+            pred = self.model(t_train)
+            loss = self.criterion(pred, x_train)
             
-            train_loss.backward()
+            loss.backward()
             self.optimizer.step()
             
             # Step scheduler if available
@@ -104,19 +110,30 @@ class BaselineTrainer:
             # Validation
             self.model.eval()
             with torch.no_grad():
-                x_val_pred = self.model(t_val)
-                val_loss = self.criterion(x_val_pred, x_val)
+                val_pred = self.model(t_val)
+                val_loss = self.criterion(val_pred, x_val)
             
-            self.train_losses.append(train_loss.item())
+            # Store losses
+            self.train_losses.append(loss.item())
             self.val_losses.append(val_loss.item())
             
-            if epoch % 100 == 0:
-                print(f"Epoch {epoch}: Train Loss = {train_loss.item():.6f}, Val Loss = {val_loss.item():.6f}")
-        
-        return {
-            'train_losses': self.train_losses,
-            'val_losses': self.val_losses
-        }
+            # Early stopping check
+            if val_loss.item() < best_val_loss:
+                best_val_loss = val_loss.item()
+                patience_counter = 0
+                best_model_state = self.model.state_dict().copy()
+            else:
+                patience_counter += 1
+            
+            # Stop if validation loss hasn't improved
+            if patience_counter >= patience:
+                print(f"Early stopping at epoch {epoch}, best val loss: {best_val_loss:.6f}")
+                # Restore best model
+                self.model.load_state_dict(best_model_state)
+                break
+            
+            if verbose and epoch % 100 == 0:
+                print(f'Epoch {epoch}: Train Loss = {loss.item():.6f}, Val Loss = {val_loss.item():.6f}')
     
     def predict(self, t: np.ndarray) -> np.ndarray:
         """Make predictions"""
@@ -174,7 +191,7 @@ class BaselineTrainer:
             plt.savefig('plots/baseline_nn_training.png', dpi=300, bbox_inches='tight')
             print("Training plot saved to plots/baseline_nn_training.png")
         
-        plt.show()
+        # plt.show()
 
 def main():
     """Test the baseline neural network"""
@@ -207,7 +224,7 @@ def main():
     plt.title('Baseline NN Predictions')
     plt.legend()
     plt.grid(True, alpha=0.3)
-    plt.show()
+    # plt.show()
 
 if __name__ == "__main__":
     main() 

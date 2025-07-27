@@ -98,23 +98,28 @@ class PINNTrainer:
         else:
             raise ValueError(f"Unknown system: {system}")
     
-    def train(self, t_data: np.ndarray, x_data: np.ndarray, 
-              epochs: int = 1000, val_split: float = 0.2, 
-              system: str = 'damped_oscillator') -> Dict[str, list]:
-        """Train the PINN"""
-        
+    def train(self, t: np.ndarray, x: np.ndarray, epochs: int = 1000, 
+              val_split: float = 0.2, system: str = 'damped_oscillator', verbose: bool = True):
+        """Train PINN with physics loss and early stopping"""
         # Convert to tensors
-        t_tensor = torch.FloatTensor(t_data.reshape(-1, 1))
-        x_tensor = torch.FloatTensor(x_data.reshape(-1, 1))
+        t_tensor = torch.FloatTensor(t.reshape(-1, 1))
+        x_tensor = torch.FloatTensor(x.reshape(-1, 1))
         
-        # Split into train/val
-        n_train = int(len(t_data) * (1 - val_split))
-        t_train = t_tensor[:n_train]
-        x_train = x_tensor[:n_train]
-        t_val = t_tensor[n_train:]
-        x_val = x_tensor[n_train:]
+        # Split data
+        n_val = int(len(t) * val_split)
+        indices = np.random.permutation(len(t))
         
-        print(f"Training PINN for {system}...")
+        train_indices = indices[n_val:]
+        val_indices = indices[:n_val]
+        
+        t_train, x_train = t_tensor[train_indices], x_tensor[train_indices]
+        t_val, x_val = t_tensor[val_indices], x_tensor[val_indices]
+        
+        # Early stopping parameters
+        best_val_loss = float('inf')
+        patience = 500  # Stop if no improvement for 500 epochs
+        patience_counter = 0
+        best_model_state = None
         
         for epoch in range(epochs):
             # Training
@@ -122,8 +127,8 @@ class PINNTrainer:
             self.optimizer.zero_grad()
             
             # Data loss
-            x_pred = self.model(t_train)
-            data_loss = torch.mean((x_pred - x_train)**2)
+            pred = self.model(t_train)
+            data_loss = nn.MSELoss()(pred, x_train)
             
             # Physics loss
             physics_loss = self.compute_physics_loss(t_train, system)
@@ -141,23 +146,31 @@ class PINNTrainer:
             # Validation
             self.model.eval()
             with torch.no_grad():
-                x_val_pred = self.model(t_val)
-                val_loss = torch.mean((x_val_pred - x_val)**2)
+                val_pred = self.model(t_val)
+                val_loss = nn.MSELoss()(val_pred, x_val)
             
+            # Store losses
             self.train_losses.append(data_loss.item())
             self.val_losses.append(val_loss.item())
             self.physics_losses.append(physics_loss.item())
             
-            if epoch % 100 == 0:
-                print(f"Epoch {epoch}: Data Loss = {data_loss.item():.6f}, "
-                      f"Physics Loss = {physics_loss.item():.6f}, "
-                      f"Val Loss = {val_loss.item():.6f}")
-        
-        return {
-            'train_losses': self.train_losses,
-            'val_losses': self.val_losses,
-            'physics_losses': self.physics_losses
-        }
+            # Early stopping check (use validation loss)
+            if val_loss.item() < best_val_loss:
+                best_val_loss = val_loss.item()
+                patience_counter = 0
+                best_model_state = self.model.state_dict().copy()
+            else:
+                patience_counter += 1
+            
+            # Stop if validation loss hasn't improved
+            if patience_counter >= patience:
+                print(f"Early stopping at epoch {epoch}, best val loss: {best_val_loss:.6f}")
+                # Restore best model
+                self.model.load_state_dict(best_model_state)
+                break
+            
+            if verbose and epoch % 100 == 0:
+                print(f"Epoch {epoch}: Data Loss = {data_loss.item():.6f}, Physics Loss = {physics_loss.item():.6f}, Val Loss = {val_loss.item():.6f}")
     
     def predict(self, t: np.ndarray) -> np.ndarray:
         """Make predictions"""
@@ -230,7 +243,7 @@ class PINNTrainer:
             plt.savefig('plots/pinn_training.png', dpi=300, bbox_inches='tight')
             print("Training plot saved to plots/pinn_training.png")
         
-        plt.show()
+        # plt.show()
 
 def main():
     """Test the PINN"""
@@ -264,7 +277,7 @@ def main():
     plt.title('PINN Predictions')
     plt.legend()
     plt.grid(True, alpha=0.3)
-    plt.show()
+    # plt.show()
 
 if __name__ == "__main__":
     main() 

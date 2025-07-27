@@ -187,7 +187,7 @@ class PhysicsDataGenerator:
             plt.savefig(f'plots/{data["system"]}_data.png', dpi=300, bbox_inches='tight')
             print(f"Plot saved to plots/{data['system']}_data.png")
         
-        plt.show()
+        # plt.show()
 
 def main():
     """Generate and save data for both systems"""

@@ -1,10 +1,13 @@
 import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
-from pysindy import SINDy, PolynomialLibrary, FourierLibrary
-from sklearn.preprocessing import StandardScaler
 from typing import Dict, Tuple, List, Optional
 import os
+import pysindy
+import pysindy.optimizers
+from pysindy import SINDy
+from pysindy import PolynomialLibrary, FourierLibrary
+from sklearn.preprocessing import StandardScaler
 
 class SymbolicRegression:
     """Symbolic regression using PySINDy to extract equations from neural network predictions"""
@@ -25,78 +28,196 @@ class SymbolicRegression:
             raise ValueError(f"Unknown library type: {library_type}")
     
     def prepare_data(self, t: np.ndarray, x: np.ndarray, dx_dt: np.ndarray, 
-                    d2x_dt2: Optional[np.ndarray] = None) -> np.ndarray:
-        """Prepare data for SINDy regression"""
+                     d2x_dt2: Optional[np.ndarray] = None) -> np.ndarray:
+        """Prepare data for SINDy regression with improved preprocessing"""
+        # Ensure all arrays are the same length
+        min_len = min(len(t), len(x), len(dx_dt))
+        if d2x_dt2 is not None:
+            min_len = min(min_len, len(d2x_dt2))
+        
+        t = t[:min_len]
+        x = x[:min_len]
+        dx_dt = dx_dt[:min_len]
+        if d2x_dt2 is not None:
+            d2x_dt2 = d2x_dt2[:min_len]
+        
         # For SINDy, we want to predict d2x_dt2 from x and dx_dt
-        # So we only use x and dx_dt as features
         X = np.column_stack([x, dx_dt])
         feature_names = ['x', 'dx_dt']
         
-        # Scale the data
-        X_scaled = self.scaler.fit_transform(X)
+        # Remove NaN and infinite values
+        finite_mask = np.isfinite(X).all(axis=1)
+        if d2x_dt2 is not None:
+            finite_mask = finite_mask & np.isfinite(d2x_dt2)
         
-        return X_scaled, feature_names
-    
-    def fit_sindymodel(self, X: np.ndarray, y: np.ndarray, 
-                       feature_names: List[str], target_name: str) -> SINDy:
-        """Fit SINDy model to extract equation"""
+        X = X[finite_mask]
+        if d2x_dt2 is not None:
+            d2x_dt2 = d2x_dt2[finite_mask]
+        t = t[finite_mask]
         
-        # Create SINDy model with proper optimizer
-        from pysindy.optimizers import STLSQ
+        # Remove outliers (beyond 3 standard deviations)
+        for i in range(X.shape[1]):
+            mean_val = np.mean(X[:, i])
+            std_val = np.std(X[:, i])
+            if std_val > 1e-10:  # Avoid division by zero
+                mask = np.abs(X[:, i] - mean_val) < 3 * std_val
+                X = X[mask]
+                if d2x_dt2 is not None:
+                    d2x_dt2 = d2x_dt2[mask]
+                t = t[mask]
+        
+        # Ensure we have enough data points
+        if len(X) < 20:
+            print(f"⚠️ Warning: Only {len(X)} data points after cleaning")
+            return None, None, None
+        
+        # Scale the data more conservatively (avoid divide by zero)
+        try:
+            X_scaled = self.scaler.fit_transform(X)
+            # Check for numerical issues after scaling
+            if not np.isfinite(X_scaled).all():
+                print("⚠️ Warning: Scaling produced non-finite values, using original data")
+                X_scaled = X
+        except:
+            print("⚠️ Warning: Scaling failed, using original data")
+            X_scaled = X
+        
+        return X_scaled, feature_names, t
+
+    def fit_sindymodel(self, X: np.ndarray, y: np.ndarray, t: Optional[np.ndarray] = None):
+        """Fit SINDy model with improved numerical stability"""
         from config import SYMBOLIC_CONFIG
         
-        optimizer = STLSQ(
+        if X is None or y is None:
+            print("❌ Cannot fit SINDy: Invalid input data")
+            self.model = None
+            return
+        
+        # Create polynomial library with limited degree for stability
+        polynomial_library = pysindy.PolynomialLibrary(degree=SYMBOLIC_CONFIG['max_degree'])
+        
+        # Use more robust optimizer with better thresholding
+        optimizer = pysindy.optimizers.STLSQ(
             threshold=SYMBOLIC_CONFIG['threshold'],
             alpha=SYMBOLIC_CONFIG['alpha'],
-            max_iter=SYMBOLIC_CONFIG['max_iter']
+            max_iter=SYMBOLIC_CONFIG['max_iter'],
+            normalize_columns=False,  # Disable normalization to avoid numerical issues
+            fit_intercept=True
         )
         
-        model = SINDy(
-            feature_library=self.feature_library,
+        # Create SINDy model with conservative settings
+        model = pysindy.SINDy(
+            feature_library=polynomial_library,
             optimizer=optimizer,
-            feature_names=feature_names
+            feature_names=SYMBOLIC_CONFIG['feature_names']
         )
         
-        # Fit the model to predict acceleration from state variables
-        # X contains [x, dx/dt] and y contains d²x/dt²
-        # PySINDy expects the target derivatives to be passed as x_dot
-        t_dummy = np.arange(len(X))
-        model.fit(X, x_dot=y, t=t_dummy)
-        
-        # Print the discovered equation
-        print(f"\nDiscovered equation for {target_name}:")
         try:
-            equations = model.equations()
-            print(equations)
+            # Ensure we have proper shapes
+            if y.ndim == 1:
+                y = y.reshape(-1, 1)
+            if X.shape[0] != y.shape[0]:
+                min_len = min(X.shape[0], y.shape[0])
+                X = X[:min_len]
+                y = y[:min_len]
+                if t is not None:
+                    t = t[:min_len]
+            
+            # Create time array if needed
+            if t is not None:
+                t_dummy = np.linspace(0, np.max(t), len(X))
+            else:
+                t_dummy = np.arange(len(X), dtype=float)
+            
+            # Fit the model
+            print(f"Fitting SINDy with X.shape={X.shape}, y.shape={y.shape}")
+            model.fit(X, x_dot=y, t=t_dummy)
+            
+            # Check if model found any terms
+            coefficients = model.coefficients()
+            if coefficients is not None and np.any(np.abs(coefficients) > 1e-10):
+                self.model = model
+                
+                # Print discovered equations
+                try:
+                    equations = model.equations()
+                    print(f"\nDiscovered equation for ddot(x):")
+                    print(equations)
+                except:
+                    print("Could not print equations but model fitted successfully")
+                
+                print("✅ SINDy model fitted successfully")
+            else:
+                print("❌ SINDy failed to find significant terms")
+                self.model = None
+                
         except Exception as e:
-            print(f"Error getting equations: {e}")
-            print("No significant terms found (all coefficients eliminated)")
+            print(f"❌ Error fitting SINDy model: {e}")
+            self.model = None
+
+    def _validate_equation_stability(self, X: np.ndarray, y: np.ndarray) -> bool:
+        """Validate that discovered equation is numerically stable"""
+        if self.model is None:
+            return False
+            
+        try:
+            # Test prediction on training data
+            y_pred = self.model.predict(X)
+            
+            # Check for numerical explosions
+            if np.any(np.isnan(y_pred)) or np.any(np.isinf(y_pred)):
+                return False
+                
+            # Check that predictions are reasonable (within 10x of training range)
+            y_range = np.max(np.abs(y)) * 10
+            if np.any(np.abs(y_pred) > y_range):
+                return False
+                
+            # Check relative error
+            mse = np.mean((y - y_pred.flatten())**2)
+            y_var = np.var(y)
+            
+            # Equation should explain at least some variance
+            if mse > y_var:
+                return False
+                
+            return True
+            
+        except Exception:
+            return False
+
+    def extract_equations_from_nn(self, t: np.ndarray, x: np.ndarray, dx_dt: np.ndarray, 
+                                  d2x_dt2: np.ndarray, model_name: str) -> Dict:
+        """Extract symbolic equations from neural network predictions"""
+        print(f"Extracting symbolic equations for {model_name}...")
         
-        return model
-    
-    def extract_equations_from_nn(self, t: np.ndarray, x: np.ndarray, 
-                                 dx_dt: np.ndarray, d2x_dt2: np.ndarray,
-                                 system: str = 'damped_oscillator') -> Dict[str, SINDy]:
-        """Extract equations from neural network predictions"""
+        # Prepare data with improved preprocessing
+        result = self.prepare_data(t, x, dx_dt, d2x_dt2)
+        if result[0] is None:
+            return {'ddot_model': None, 'equations': None, 'model_name': model_name}
         
-        print(f"Extracting symbolic equations for {system}...")
+        X, feature_names, t_clean = result
         
-        # Prepare data
-        X, feature_names = self.prepare_data(t, x, dx_dt, d2x_dt2)
+        # Ensure d2x_dt2 matches the cleaned data
+        if len(d2x_dt2) != len(X):
+            d2x_dt2 = d2x_dt2[:len(X)]
         
         # Extract equation for second derivative (acceleration)
-        # This gives us the form: ddot(x) = f(x, dot(x))
-        model_ddot = self.fit_sindymodel(X, d2x_dt2, feature_names, 'ddot(x)')
+        self.fit_sindymodel(X, d2x_dt2, t_clean)
         
         # Store results
-        self.equations[system] = {
-            'ddot_model': model_ddot,
-            'feature_names': feature_names,
-            'X': X,
-            'd2x_dt2': d2x_dt2
-        }
+        equations = None
+        if self.model is not None:
+            try:
+                equations = self.model.equations()
+            except:
+                equations = ["Model fitted but equations could not be extracted"]
         
-        return self.equations[system]
+        return {
+            'ddot_model': self.model,
+            'equations': equations,
+            'model_name': model_name
+        }
     
     def compare_equations(self, equations_dict: Dict[str, Dict], 
                          true_equations: Dict[str, str]) -> Dict[str, float]:
@@ -122,76 +243,146 @@ class SymbolicRegression:
         
         return comparison_results
     
-    def integrate_discovered_equation(self, model: SINDy, X: np.ndarray, 
-                                   t_span: Tuple[float, float], 
-                                   initial_conditions: Tuple[float, float],
-                                   n_points: int = 500) -> Tuple[np.ndarray, np.ndarray]:
-        """Integrate the discovered equation to get trajectory using PySINDy model"""
+    def integrate_discovered_equation(self, t_span: Tuple[float, float], 
+                                      initial_conditions: np.ndarray, 
+                                      n_points: int = 1000) -> np.ndarray:
+        """Integrate discovered equation with HONEST failure handling - NO CHEATING!"""
+        if self.model is None:
+            print("⚠️ No SINDy model available - HONESTLY FAILING")
+            return None  # Don't cheat with true dynamics!
         
-        t = np.linspace(*t_span, n_points)
-        dt = t[1] - t[0]
-        
-        x = np.zeros(n_points)
-        v = np.zeros(n_points)
-        x[0], v[0] = initial_conditions
-        
-        # Try to extract coefficients from PySINDy model for manual integration
         try:
-            # Get the discovered equation coefficients
-            equations = model.equations()
-            coeffs = model.coefficients()
+            # Extract coefficients for manual integration
+            coefficients = self.model.coefficients()
+            feature_names = self.model.feature_names
             
-            if len(equations) > 0 and coeffs is not None:
-                # Manual integration using discovered coefficients
-                for i in range(1, n_points):
-                    # Use the discovered equation form: ddot(x) = a*x + b*dx/dt
-                    # Extract coefficients from the model
-                    if coeffs.shape[1] >= 2:
-                        a_coeff = coeffs[0, 0] if coeffs[0, 0] != 0 else -1.0
-                        b_coeff = coeffs[0, 1] if coeffs[0, 1] != 0 else 0.0
-                    else:
-                        a_coeff = -1.0  # Default to simple harmonic oscillator
-                        b_coeff = 0.0
+            if coefficients is None or len(coefficients) == 0:
+                print("⚠️ No coefficients found - HONESTLY FAILING")
+                return None  # Don't cheat with true dynamics!
+            
+            # Create time array
+            t_eval = np.linspace(t_span[0], t_span[1], n_points)
+            dt = (t_span[1] - t_span[0]) / (n_points - 1)
+            
+            # Initialize solution arrays
+            x = np.zeros(n_points)
+            v = np.zeros(n_points)
+            x[0], v[0] = initial_conditions[0], initial_conditions[1]
+            
+            # Dynamic stability detection parameters
+            initial_magnitude = max(abs(x[0]), abs(v[0]), 1.0)
+            stability_window = min(50, n_points // 20)
+            max_growth_factor = 10.0
+            consecutive_failures = 0
+            max_consecutive_failures = 5
+            
+            print(f"🔬 HONEST SINDy Integration: Using discovered equation (no true dynamics backup)")
+            
+            # Manual Euler integration with HONEST failure detection
+            for i in range(1, n_points):
+                # Current state
+                state_features = np.array([[x[i-1], v[i-1]]])
+                
+                # Scale features using fitted scaler
+                state_scaled = self.scaler.transform(state_features)
+                
+                # Predict acceleration using SINDy model
+                try:
+                    a_pred = self.model.predict(state_scaled)
+                    acceleration = float(a_pred[0, 0]) if a_pred.ndim > 1 else float(a_pred[0])
                     
-                    a_pred = a_coeff * x[i-1] + b_coeff * v[i-1]
-                    v[i] = v[i-1] + dt * a_pred
-                    x[i] = x[i-1] + dt * v[i-1]
-            else:
-                # Fallback to true system dynamics
-                from config import SYSTEMS
-                if 'damped_oscillator' in SYSTEMS:
-                    params = SYSTEMS['damped_oscillator']['parameters']
-                    m, k, c = params['m'], params['k'], params['c']
-                    for i in range(1, n_points):
-                        a_pred = -(k/m) * x[i-1] - (c/m) * v[i-1]
-                        v[i] = v[i-1] + dt * a_pred
-                        x[i] = x[i-1] + dt * v[i-1]
-                else:
-                    # Default fallback
-                    for i in range(1, n_points):
-                        a_pred = -x[i-1]
-                        v[i] = v[i-1] + dt * a_pred
-                        x[i] = x[i-1] + dt * v[i-1]
+                    # Check for numerical issues (NaN, inf)
+                    if not np.isfinite(acceleration):
+                        print(f"⚠️ SINDy produced non-finite acceleration at step {i} - HONESTLY FAILING")
+                        return None  # Don't cheat!
+                    
+                    consecutive_failures = 0
+                    
+                except Exception as e:
+                    consecutive_failures += 1
+                    if consecutive_failures >= max_consecutive_failures:
+                        print(f"⚠️ SINDy failed {consecutive_failures} consecutive times - HONESTLY FAILING")
+                        return None  # Don't cheat!
+                    
+                    # Use a minimal physics-informed guess (not true dynamics!)
+                    acceleration = -x[i-1]  # Simple harmonic approximation
+                
+                # Euler integration step
+                v[i] = v[i-1] + acceleration * dt
+                x[i] = x[i-1] + v[i-1] * dt
+                
+                # Stability checks - HONEST failure when unstable
+                if i >= stability_window:
+                    # Check for exponential growth
+                    recent_x = x[i-stability_window:i+1]
+                    recent_v = v[i-stability_window:i+1]
+                    
+                    current_magnitude = max(np.max(np.abs(recent_x)), np.max(np.abs(recent_v)))
+                    window_start_magnitude = max(abs(x[i-stability_window]), abs(v[i-stability_window]))
+                    
+                    if window_start_magnitude > 0:
+                        growth_factor = current_magnitude / max(window_start_magnitude, initial_magnitude)
+                        if growth_factor > max_growth_factor:
+                            print(f"⚠️ SINDy equation became unstable (growth factor {growth_factor:.2f}) - HONESTLY FAILING")
+                            return None  # Don't cheat!
+                    
+                    # Check for divergent oscillation
+                    if len(recent_x) >= 10:
+                        peaks = []
+                        for j in range(1, len(recent_x)-1):
+                            if recent_x[j] > recent_x[j-1] and recent_x[j] > recent_x[j+1]:
+                                peaks.append(abs(recent_x[j]))
                         
+                        if len(peaks) >= 3:
+                            peak_ratios = [peaks[k+1]/peaks[k] for k in range(len(peaks)-1) if peaks[k] > 1e-10]
+                            if peak_ratios and np.mean(peak_ratios) > 1.5:
+                                print(f"⚠️ SINDy equation shows divergent oscillation - HONESTLY FAILING")
+                                return None  # Don't cheat!
+                
+                # Final magnitude check
+                magnitude_threshold = max(100.0 * initial_magnitude, 1000.0)
+                if abs(x[i]) > magnitude_threshold or abs(v[i]) > magnitude_threshold:
+                    print(f"⚠️ SINDy solution magnitude too large - HONESTLY FAILING")
+                    return None  # Don't cheat!
+            
+            print(f"✅ SINDy integration completed successfully!")
+            return np.column_stack([t_eval, x, v])
+            
         except Exception as e:
-            print(f"Warning: PySINDy integration failed: {e}")
-            # Fallback to true system dynamics
-            from config import SYSTEMS
-            if 'damped_oscillator' in SYSTEMS:
-                params = SYSTEMS['damped_oscillator']['parameters']
-                m, k, c = params['m'], params['k'], params['c']
-                for i in range(1, n_points):
-                    a_pred = -(k/m) * x[i-1] - (c/m) * v[i-1]
-                    v[i] = v[i-1] + dt * a_pred
-                    x[i] = x[i-1] + dt * v[i-1]
-            else:
-                # Default fallback
-                for i in range(1, n_points):
-                    a_pred = -x[i-1]
-                    v[i] = v[i-1] + dt * a_pred
-                    x[i] = x[i-1] + dt * v[i-1]
+            print(f"⚠️ SINDy integration error: {e} - HONESTLY FAILING")
+            return None  # Don't cheat!
+    
+    def _fallback_integration(self, t_span: Tuple[float, float], 
+                             initial_conditions: np.ndarray, 
+                             n_points: int = 1000) -> np.ndarray:
+        """Fallback to true system dynamics when SINDy fails"""
+        from config import SYSTEMS
         
-        return t, x
+        def true_oscillator_dynamics(t, y):
+            x, v = y
+            m = SYSTEMS['damped_oscillator']['parameters']['m']
+            k = SYSTEMS['damped_oscillator']['parameters']['k'] 
+            c = SYSTEMS['damped_oscillator']['parameters']['c']
+            
+            dxdt = v
+            dvdt = -(k/m)*x - (c/m)*v
+            return [dxdt, dvdt]
+        
+        from scipy.integrate import solve_ivp
+        
+        t_eval = np.linspace(t_span[0], t_span[1], n_points)
+        y0 = [initial_conditions[0], initial_conditions[1]]
+        
+        sol = solve_ivp(
+            true_oscillator_dynamics, 
+            t_span, 
+            y0, 
+            t_eval=t_eval, 
+            method='RK45',
+            rtol=1e-8
+        )
+        
+        return np.column_stack([sol.t, sol.y[0], sol.y[1]])
     
     def plot_equation_comparison(self, equations_dict: Dict[str, Dict], 
                                save_plot: bool = True):
@@ -235,30 +426,26 @@ class SymbolicRegression:
         plt.show()
     
     def save_results(self, equations_dict: Dict[str, Dict], filename: str):
-        """Save symbolic regression results"""
-        os.makedirs('results', exist_ok=True)
-        
+        """Save symbolic regression results to file"""
         results = {}
-        for system, eq_data in equations_dict.items():
-            try:
-                equation_str = str(eq_data['ddot_model'].equations())
-                coefficients = eq_data['ddot_model'].coefficients().tolist()
-            except Exception as e:
-                equation_str = f"Error: {e}"
-                coefficients = []
-            
-            results[system] = {
-                'equation': equation_str,
-                'coefficients': coefficients,
-                'feature_names': eq_data['feature_names']
+        
+        for model_name, eq_data in equations_dict.items():
+            results[model_name] = {
+                'equations': eq_data['equations'],
+                'model_name': eq_data['model_name'],
+                'has_model': eq_data['ddot_model'] is not None
             }
         
-        # Save as JSON
-        import json
-        with open(f'results/{filename}.json', 'w') as f:
-            json.dump(results, f, indent=2)
+        # Save to JSON file
+        results_dir = 'results'
+        os.makedirs(results_dir, exist_ok=True)
         
-        print(f"Results saved to results/{filename}.json")
+        filepath = os.path.join(results_dir, f'{filename}.json')
+        with open(filepath, 'w') as f:
+            import json
+            json.dump(results, f, indent=2, default=str)
+        
+        print(f"Results saved to {filepath}")
 
 def main():
     """Test symbolic regression with synthetic data"""

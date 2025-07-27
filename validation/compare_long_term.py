@@ -207,17 +207,31 @@ class LongTermValidator:
             eq_data = sr.extract_equations_from_nn(data['t'].values, q, dq_dt, d2x_dt2, f'{name}_{system}')
             equations[name] = eq_data
         
-        # Integrate discovered equations
+        # Long-term validation using discovered equations - HONEST EVALUATION
         equation_predictions = {}
         for name, eq_data in equations.items():
-            # Get the X data from the equation data
-            X = eq_data['X']
-            t_eq, x_eq = sr.integrate_discovered_equation(
-                eq_data['ddot_model'], X, t_span, initial_conditions)
-            equation_predictions[name] = {
-                't': t_eq,
-                'x': x_eq
-            }
+            # Compare discovered equation integration  
+            try:
+                if eq_data['ddot_model'] is not None:
+                    # Set the model in the symbolic regression instance
+                    sr.model = eq_data['ddot_model']
+                    t_eq_result = sr.integrate_discovered_equation(t_span, initial_conditions)
+                    if t_eq_result is not None and len(t_eq_result) > 0:
+                        t_eq, x_eq = t_eq_result[:, 0], t_eq_result[:, 1]
+                        equation_predictions[name] = {
+                            't': t_eq,
+                            'x': x_eq
+                        }
+                        print(f"✅ {name} discovered equation integrated successfully")
+                    else:
+                        print(f"⚠️ {name} discovered equation HONESTLY FAILED (no cheating with true dynamics)")
+                        equation_predictions[name] = None
+                else:
+                    print(f"⚠️ No equation available for {name}")
+                    equation_predictions[name] = None
+            except Exception as e:
+                print(f"⚠️ Error integrating {name} equation: {e}")
+                equation_predictions[name] = None
         
         # Compute metrics
         metrics = {}
@@ -226,9 +240,16 @@ class LongTermValidator:
             nn_metrics = self.compute_metrics(t_true, x_true, 
                                             predictions[name]['t'], predictions[name]['x'])
             
-            # Equation metrics
-            eq_metrics = self.compute_metrics(t_true, x_true,
-                                           equation_predictions[name]['t'], equation_predictions[name]['x'])
+            # Equation metrics - handle honest failures
+            if equation_predictions[name] is not None:
+                eq_metrics = self.compute_metrics(t_true, x_true,
+                                               equation_predictions[name]['t'], equation_predictions[name]['x'])
+            else:
+                eq_metrics = {
+                    'rmse': float('inf'), 
+                    'energy_variance': float('inf'),
+                    'final_energy_error': float('inf')
+                }
             
             metrics[name] = {
                 'neural_network': nn_metrics,
@@ -281,8 +302,11 @@ class LongTermValidator:
         axes[0, 1].plot(t_true, x_true, 'k-', label='True', linewidth=2)
         
         for i, (name, pred) in enumerate(results['equation_predictions'].items()):
-            axes[0, 1].plot(pred['t'], pred['x'], f'{colors[i]}-', 
-                           label=f'{name.upper()} Eq', alpha=0.7, linewidth=1.5)
+            if pred is not None:
+                axes[0, 1].plot(pred['t'], pred['x'], f'{colors[i]}-', 
+                               label=f'{name.upper()} Eq', alpha=0.7, linewidth=1.5)
+            else:
+                print(f"Skipping plot for {name} due to integration failure.")
         
         axes[0, 1].set_xlabel('Time')
         axes[0, 1].set_ylabel('Position')

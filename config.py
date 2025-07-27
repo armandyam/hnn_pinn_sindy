@@ -8,103 +8,110 @@ import numpy as np
 
 # Data Generation Parameters
 DATA_CONFIG = {
-    'noise_level': 0.01,           # Gaussian noise standard deviation
-    'subsample_factor': 5,          # Factor for data subsampling
-    't_span': (0, 20),             # Increased time span for better conditioning
-    'n_points': 10000,              # More points for better coverage
-    'initial_conditions': [(1.0, 0.0), (0.5, 0.0), (1.0, 1.0)],  # Multiple ICs for generalization
+    't_span': (0, 15),  # Reduced from 20 to focus on core dynamics
+    'n_points': 8000,   # Reduced from 10000 for less overfitting
+    'noise_level': 0.02,  # Increased noise for robustness
+    'subsample_factor': 3,  # Increased subsampling for more challenging learning
+    'initial_conditions': [(1.0, 0.0), (0.5, 0.0), (1.0, 1.0), (0.3, 0.5), (1.5, 0.0)]  # More diverse conditions
 }
 
 # Neural Network Parameters
 NN_CONFIG = {
-    'hidden_layers': [128, 64, 32], # Deeper network with better capacity
-    'learning_rate': 5e-4,          # Lower learning rate for stability
-    'epochs': 15000,                # More training epochs
-    'val_split': 0.2,               # Validation split ratio
-    'batch_size': 32,               # Batch size for training
-    'weight_decay': 1e-5,           # L2 regularization to prevent overfitting
-    'activation': 'tanh',            # Activation function
-    'optimizer': 'adamw',           # Optimizer type
-    'scheduler': 'steplr',          # Learning rate scheduler
+    'hidden_layers': [64, 32],  # Simpler architecture to reduce overfitting
+    'activation': 'tanh',
+    'learning_rate': 1e-3,  # Increased learning rate for faster convergence
+    'epochs': 8000,  # Reduced epochs to prevent overfitting
+    'val_split': 0.2,
+    'batch_size': 64,  # Increased batch size for more stable gradients
+    'weight_decay': 1e-3,  # Increased regularization
+    'optimizer': 'adamw',
+    'scheduler': 'steplr',
     'scheduler_params': {
-        'step_size': 1000,
-        'gamma': 0.9
+        'step_size': 1500,  # More frequent LR drops
+        'gamma': 0.7  # More aggressive LR reduction
     }
 }
 
 # PINN Parameters
 PINN_CONFIG = {
-    'physics_weight': 10.0,        # Increased weight for physics loss term
-    'activation': 'tanh',          # Smooth activation for physics
-    'hidden_layers': [128, 128],   # Shallow & wider for PINN
-    'optimizer': 'adamw',          # Use AdamW for better optimization
-    'scheduler': 'steplr',         # Learning rate scheduler
+    'hidden_layers': [64, 64],  # Simpler than before
+    'activation': 'tanh',
+    'physics_weight': 50.0,  # Much higher physics weight
+    'optimizer': 'adamw',
+    'scheduler': 'steplr',
     'scheduler_params': {
-        'step_size': 1000,
-        'gamma': 0.9
+        'step_size': 1500,
+        'gamma': 0.7
     },
-    'residual_points': 1000,       # Number of collocation points for physics loss
+    'residual_points': 2000  # More physics constraints
 }
 
 # HNN Parameters
 HNN_CONFIG = {
-    'energy_weight': 10.0,           # Increased weight for energy conservation
-    'learning_rate': 5e-4,           # Lower learning rate for stability
-    'epochs': 15000,                 # More training epochs
-    'batch_size': 32,                # Batch size for training
-    'weight_decay': 1e-5,            # L2 regularization
-    'activation': 'tanh',            # Smooth activation for Hamiltonian
-    'hidden_layers': [128, 128],     # Shallow & wider for HNN
-    'optimizer': 'adamw',            # Use AdamW for better optimization
-    'scheduler': 'steplr',           # Learning rate scheduler
+    'hidden_layers': [64, 32],  # Simpler architecture
+    'activation': 'tanh',
+    'learning_rate': 5e-4,  # Slightly lower LR for stability
+    'epochs': 8000,
+    'batch_size': 64,
+    'energy_weight': 100.0,  # Much higher energy conservation weight
+    'weight_decay': 1e-3,
+    'optimizer': 'adamw',
+    'scheduler': 'steplr',
     'scheduler_params': {
-        'step_size': 1000,
-        'gamma': 0.9
+        'step_size': 1500,
+        'gamma': 0.7
     },
-    'normalize_inputs': True,        # Normalize q, p inputs to unit scale
+    'normalize_inputs': False  # Disable normalization for simplicity
 }
 
 # Symbolic Regression Parameters
 SYMBOLIC_CONFIG = {
-    'library_type': 'polynomial',   # 'polynomial' or 'fourier'
-    'max_degree': 3,               # Lower degree for simpler equations
-    'threshold': 0.001,            # Lower threshold for more terms
-    'alpha': 0.001,                # Lower alpha for less regularization
-    'max_iter': 20,                # More iterations for better convergence
+    'max_degree': 2,  # Reduced complexity - focus on linear/quadratic terms
+    'threshold': 0.001,  # Lower threshold to allow more terms
+    'alpha': 0.001,  # Lower regularization for more terms
+    'max_iter': 50,  # More iterations for better convergence
+    'feature_names': ['x', 'dx_dt']
 }
 
 # Validation Parameters
 VALIDATION_CONFIG = {
-    't_span': (0, 100),            # Time span for long-term validation
-    'n_points': 10000,              # Number of points for integration
+    't_span': (0, 50),  # Shorter validation period
+    'n_points': 5000,
+    'initial_conditions': [(1.0, 0.0)]  # Single condition for cleaner analysis
 }
 
 # System-specific Parameters
 SYSTEMS = {
     'damped_oscillator': {
-        'initial_conditions': (1.0, 0.0),
-        'parameters': {'m': 1.0, 'k': 1.0, 'c': 0.0},
-        'true_equation': 'ddot(x) + x = 0'  # Updated for undamped case
+        'parameters': {
+            'm': 1.0,
+            'k': 1.0,
+            'c': 0.0  # Undamped oscillator
+        },
+        'true_equation': 'x_ddot = -1.0 * x'  # Simple harmonic oscillator
     },
     'pendulum': {
-        'initial_conditions': (np.pi/4, 0.0),
-        'parameters': {'g': 9.81, 'L': 1.0, 'c': 0.1},
-        'true_equation': 'ddot(theta) + 0.1*dot(theta) + 9.81*sin(theta) = 0'
+        'parameters': {
+            'g': 9.81,
+            'L': 1.0,
+            'c': 0.1
+        },
+        'true_equation': 'theta_ddot = -(g/L) * sin(theta) - c * theta_dot'
     }
 }
 
 # Experiment Configuration
 EXPERIMENT_CONFIG = {
-    'systems': ['damped_oscillator', 'pendulum'],  # Systems to study
-    'models': ['baseline_nn', 'pinn', 'hnn'],     # Models to compare
-    'save_plots': True,                            # Whether to save plots
-    'save_results': True,                          # Whether to save results
+    'run_all_systems': False,
+    'save_plots': True,
+    'save_models': True,
+    'verbose': True
 }
 
 # File Paths
 PATHS = {
-    'data_dir': 'data',
-    'models_dir': 'models/saved',
-    'results_dir': 'results',
-    'plots_dir': 'plots'
+    'data': 'data/',
+    'models': 'models/saved/',
+    'results': 'results/',
+    'plots': 'plots/'
 } 

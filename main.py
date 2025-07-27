@@ -1,30 +1,58 @@
 #!/usr/bin/env python3
 """
-Main execution script for AI Safety and Physics project.
-This script runs the complete pipeline:
-1. Data Generation
-2. Neural Network Training (Baseline, PINN, HNN)
-3. Symbolic Regression
-4. Long-term Validation and Comparison
+AI Safety and Physics Project - Main Pipeline
 """
 
 import os
 import sys
-import numpy as np
 import pandas as pd
-import matplotlib.pyplot as plt
-from typing import Dict, List
+import numpy as np
+import torch
+import random
+from typing import List, Dict, Any
 
-# Add project modules to path
-sys.path.append('.')
+# Set random seeds for reproducibility - DO THIS FIRST!
+def set_random_seeds(seed: int = 42):
+    """Set all random seeds for reproducible results"""
+    random.seed(seed)
+    np.random.seed(seed)
+    torch.manual_seed(seed)
+    torch.cuda.manual_seed(seed)
+    torch.cuda.manual_seed_all(seed)
+    torch.backends.cudnn.deterministic = True
+    torch.backends.cudnn.benchmark = False
+    os.environ['PYTHONHASHSEED'] = str(seed)
+
+# Initialize reproducibility BEFORE any other imports
+set_random_seeds(42)
 
 from data_generation import PhysicsDataGenerator
 from models.nn_baseline import BaselineNN, BaselineTrainer
 from models.pinn import PINN, PINNTrainer
-from models.hnn import HNN, HNNTrainer, prepare_hnn_data
+from models.hnn import HNN, HNNTrainer
 from regression.symbolic_regression import SymbolicRegression
 from validation.compare_long_term import LongTermValidator
-from config import NN_CONFIG, HNN_CONFIG, PINN_CONFIG, SYMBOLIC_CONFIG, DATA_CONFIG, VALIDATION_CONFIG, SYSTEMS, EXPERIMENT_CONFIG, PATHS
+
+# Import all config variables
+from config import (
+    NN_CONFIG, PINN_CONFIG, HNN_CONFIG, SYMBOLIC_CONFIG, 
+    DATA_CONFIG, VALIDATION_CONFIG, SYSTEMS, 
+    EXPERIMENT_CONFIG, PATHS
+)
+
+def prepare_hnn_data(t: np.ndarray, x: np.ndarray, v: np.ndarray) -> tuple:
+    """Prepare data for HNN training"""
+    # For harmonic oscillator: q = position, p = momentum = m*velocity
+    # Assuming mass m = 1 for simplicity
+    q = x.reshape(-1, 1)
+    p = v.reshape(-1, 1)  # momentum = mass * velocity, assuming m=1
+    
+    # Compute derivatives
+    dt = t[1] - t[0]
+    dq_dt = np.gradient(q.flatten(), dt).reshape(-1, 1)
+    dp_dt = np.gradient(p.flatten(), dt).reshape(-1, 1)
+    
+    return q, p, dq_dt, dp_dt
 
 class PhysicsAISafetyPipeline:
     """Complete pipeline for AI Safety and Physics project"""
