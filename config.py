@@ -53,21 +53,21 @@ PINN_CONFIG = {
 
 # HNN Configuration
 HNN_CONFIG = {
-    'hidden_layers': [128, 64, 32],  # Deeper network for better Hamiltonian approximation
-    'learning_rate': 1e-3,  # Higher learning rate for faster convergence
-    'epochs': 8000,
-    'batch_size': 64,
-    'energy_weight': 10.0,  # Reduced weight to balance data and energy losses
-    'weight_decay': 1e-4,  # Slightly higher regularization
-    'activation': 'tanh',  # Tanh is good for Hamiltonian functions
+    'hidden_layers': [128, 128, 64],  # Deeper network for smoother Hamiltonian
+    'learning_rate': 5e-4,  # Lower learning rate for stability
+    'epochs': 10000,  # More training for convergence
+    'batch_size': 32,  # Smaller batch size for better gradients
+    'energy_weight': 1.0,  # Lower energy weight to balance with data fitting
+    'weight_decay': 1e-3,  # Higher regularization for smoothness
+    'activation': 'tanh',  # Tanh for smooth Hamiltonian functions
     'optimizer': 'adamw',
     'scheduler': 'steplr',
     'scheduler_params': {
-        'step_size': 1500,  # Decay learning rate every 1500 epochs
-        'gamma': 0.8  # More aggressive decay
+        'step_size': 2000,  # Less frequent LR decay
+        'gamma': 0.9  # More conservative decay
     },
     'val_split': 0.2,
-    'normalize_inputs': True  # Enable normalization for better convergence
+    'normalize_inputs': True  # Keep normalization for better training
 }
 
 # Symbolic Regression Configuration

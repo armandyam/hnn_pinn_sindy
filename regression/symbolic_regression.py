@@ -28,34 +28,26 @@ class SymbolicRegression:
             raise ValueError(f"Unknown library type: {library_type}")
     
     def prepare_data(self, t: np.ndarray, x: np.ndarray, dx_dt: np.ndarray, 
-                     d2x_dt2: Optional[np.ndarray] = None) -> np.ndarray:
-        """Prepare data for SINDy regression with improved preprocessing"""
-        # Ensure all arrays are the same length
-        min_len = min(len(t), len(x), len(dx_dt))
-        if d2x_dt2 is not None:
-            min_len = min(min_len, len(d2x_dt2))
+                     d2x_dt2: Optional[np.ndarray] = None) -> Tuple[np.ndarray, List[str], np.ndarray]:
+        """Prepare and clean data for SINDy fitting - NO SCALING for stability"""
         
-        t = t[:min_len]
-        x = x[:min_len]
-        dx_dt = dx_dt[:min_len]
-        if d2x_dt2 is not None:
-            d2x_dt2 = d2x_dt2[:min_len]
-        
-        # For SINDy, we want to predict d2x_dt2 from x and dx_dt
-        X = np.column_stack([x, dx_dt])
+        # Create feature matrix
         feature_names = ['x', 'dx_dt']
+        X = np.column_stack([x, dx_dt])
         
-        # Remove NaN and infinite values
+        # Remove NaN and Inf values
         finite_mask = np.isfinite(X).all(axis=1)
         if d2x_dt2 is not None:
-            finite_mask = finite_mask & np.isfinite(d2x_dt2)
+            finite_mask &= np.isfinite(d2x_dt2)
         
         X = X[finite_mask]
         if d2x_dt2 is not None:
             d2x_dt2 = d2x_dt2[finite_mask]
         t = t[finite_mask]
         
-        # Remove outliers (beyond 3 standard deviations)
+        print(f"📊 Data preparation: {len(X)} points after cleaning")
+        
+        # Outlier removal (keep this for robustness)
         for i in range(X.shape[1]):
             mean_val = np.mean(X[:, i])
             std_val = np.std(X[:, i])
@@ -71,18 +63,11 @@ class SymbolicRegression:
             print(f"⚠️ Warning: Only {len(X)} data points after cleaning")
             return None, None, None
         
-        # Scale the data more conservatively (avoid divide by zero)
-        try:
-            X_scaled = self.scaler.fit_transform(X)
-            # Check for numerical issues after scaling
-            if not np.isfinite(X_scaled).all():
-                print("⚠️ Warning: Scaling produced non-finite values, using original data")
-                X_scaled = X
-        except:
-            print("⚠️ Warning: Scaling failed, using original data")
-            X_scaled = X
+        # NO SCALING - use raw features for stability during integration
+        print(f"✅ Using unscaled features for numerical stability")
+        self.scaler = None  # Disable scaler
         
-        return X_scaled, feature_names, t
+        return X, feature_names, t
 
     def fit_sindymodel(self, X: np.ndarray, y: np.ndarray, t: Optional[np.ndarray] = None):
         """Fit SINDy model with improved numerical stability"""
@@ -280,15 +265,12 @@ class SymbolicRegression:
             
             # Manual Euler integration with HONEST failure detection
             for i in range(1, n_points):
-                # Current state
+                # Current state features (no scaling needed)
                 state_features = np.array([[x[i-1], v[i-1]]])
                 
-                # Scale features using fitted scaler
-                state_scaled = self.scaler.transform(state_features)
-                
-                # Predict acceleration using SINDy model
+                # Predict acceleration using SINDy model directly (no scaling)
                 try:
-                    a_pred = self.model.predict(state_scaled)
+                    a_pred = self.model.predict(state_features)
                     acceleration = float(a_pred[0, 0]) if a_pred.ndim > 1 else float(a_pred[0])
                     
                     # Check for numerical issues (NaN, inf)
