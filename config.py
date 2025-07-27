@@ -52,6 +52,7 @@ HNN_CONFIG = {
     'learning_rate': 5e-4,           # Lower learning rate for stability
     'epochs': 15000,                 # More training epochs
     'batch_size': 32,                # Batch size for training
+    'weight_decay': 1e-5,            # L2 regularization
     'activation': 'tanh',            # Smooth activation for Hamiltonian
     'hidden_layers': [128, 128],     # Shallow & wider for HNN
     'optimizer': 'adamw',            # Use AdamW for better optimization

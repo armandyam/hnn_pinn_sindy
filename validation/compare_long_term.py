@@ -22,31 +22,51 @@ class LongTermValidator:
             'pendulum': 'ddot(theta) + 0.1*dot(theta) + 9.81*sin(theta) = 0'
         }
     
-    def load_trained_models(self, system: str = 'damped_oscillator'):
-        """Load pre-trained models"""
-        from config import NN_CONFIG
+    def load_trained_models(self, system: str):
+        """Load trained models"""
+        from config import NN_CONFIG, PINN_CONFIG, HNN_CONFIG
         
-        models = {}
-        
-        # Load baseline NN
-        baseline_model = BaselineNN(hidden_layers=NN_CONFIG['hidden_layers'])
+        # Load baseline model
+        baseline_model = BaselineNN(
+            hidden_layers=NN_CONFIG['hidden_layers'],
+            activation=NN_CONFIG['activation']
+        )
         baseline_trainer = BaselineTrainer(baseline_model)
         baseline_trainer.load_model(f'baseline_nn_{system}')
-        models['baseline_nn'] = baseline_trainer
         
-        # Load PINN
-        pinn_model = PINN(hidden_layers=NN_CONFIG['hidden_layers'])
+        # Load PINN model  
+        pinn_model = PINN(
+            hidden_layers=PINN_CONFIG['hidden_layers'],
+            activation=PINN_CONFIG['activation']
+        )
         pinn_trainer = PINNTrainer(pinn_model)
         pinn_trainer.load_model(f'pinn_{system}')
-        models['pinn'] = pinn_trainer
         
-        # Load HNN
-        hnn_model = HNN(hidden_layers=NN_CONFIG['hidden_layers'])
+        # Load HNN model
+        hnn_model = HNN(
+            hidden_layers=HNN_CONFIG['hidden_layers'],
+            activation=HNN_CONFIG['activation'],
+            normalize_inputs=HNN_CONFIG['normalize_inputs']
+        )
+        # Set normalization if enabled
+        if HNN_CONFIG['normalize_inputs']:
+            # Reload training data to get normalization stats
+            data = pd.read_csv(f'data/{system}.csv')
+            if system == 'damped_oscillator':
+                from main import prepare_hnn_data
+                q, p, _, _ = prepare_hnn_data(data['t'].values, data['x'].values, data['v'].values)
+            else:
+                from main import prepare_hnn_data
+                q, p, _, _ = prepare_hnn_data(data['t'].values, data['theta'].values, data['omega'].values)
+            hnn_model.set_normalization(q, p)
         hnn_trainer = HNNTrainer(hnn_model)
         hnn_trainer.load_model(f'hnn_{system}')
-        models['hnn'] = hnn_trainer
         
-        return models
+        return {
+            'baseline_nn': baseline_trainer,
+            'pinn': pinn_trainer, 
+            'hnn': hnn_trainer
+        }
     
     def integrate_true_system(self, t_span: Tuple[float, float], 
                             initial_conditions: Tuple[float, float],

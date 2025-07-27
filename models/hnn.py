@@ -10,10 +10,14 @@ class HNN(nn.Module):
     """Hamiltonian Neural Network that learns H(q,p)"""
     
     def __init__(self, input_dim: int = 2, hidden_layers: list = [64, 32, 16], 
-                 activation: str = 'tanh', normalize_inputs: bool = True):
+                 activation: str = 'tanh', normalize_inputs: bool = False, q_mean: float = 0.0, q_std: float = 1.0, p_mean: float = 0.0, p_std: float = 1.0):
         super(HNN, self).__init__()
         
         self.normalize_inputs = normalize_inputs
+        self.q_mean = q_mean
+        self.q_std = q_std
+        self.p_mean = p_mean
+        self.p_std = p_std
         
         # Build network dynamically from hidden_layers list
         layers = []
@@ -43,6 +47,12 @@ class HNN(nn.Module):
     
     def forward(self, q, p):
         """Compute Hamiltonian H(q,p)"""
+        # Normalize inputs if enabled
+        if self.normalize_inputs:
+            q = (q - self.q_mean) / (self.q_std + 1e-8)
+            p = (p - self.p_mean) / (self.p_std + 1e-8)
+        
+        # Concatenate q and p
         inputs = torch.cat([q, p], dim=1)
         return self.network(inputs)
     
@@ -63,14 +73,39 @@ class HNN(nn.Module):
         
         return dq_dt, dp_dt
 
+    def set_normalization(self, q_data, p_data):
+        self.q_mean = torch.tensor(q_data).float().mean()
+        self.q_std = torch.tensor(q_data).float().std()
+        self.p_mean = torch.tensor(p_data).float().mean()
+        self.p_std = torch.tensor(p_data).float().std()
+
 class HNNTrainer:
     """Trainer for Hamiltonian Neural Network"""
     
-    def __init__(self, model: HNN, lr: float = 5e-4, energy_weight: float = 1.0):
+    def __init__(self, model: HNN, lr: float = 5e-4, energy_weight: float = 1.0,
+                 optimizer_type: str = 'adam', weight_decay: float = 1e-5, 
+                 scheduler_type: str = None, scheduler_params: dict = None):
         self.model = model
-        self.optimizer = optim.Adam(model.parameters(), lr=lr, weight_decay=1e-5)
-        self.scheduler = optim.lr_scheduler.ReduceLROnPlateau(self.optimizer, mode='min', factor=0.5, patience=500)
         self.energy_weight = energy_weight
+        
+        # Choose optimizer
+        if optimizer_type == 'adamw':
+            self.optimizer = optim.AdamW(model.parameters(), lr=lr, weight_decay=weight_decay)
+        else:
+            self.optimizer = optim.Adam(model.parameters(), lr=lr, weight_decay=weight_decay)
+        
+        # Choose scheduler
+        if scheduler_type == 'steplr' and scheduler_params:
+            self.scheduler = optim.lr_scheduler.StepLR(
+                self.optimizer, 
+                step_size=scheduler_params.get('step_size', 1000),
+                gamma=scheduler_params.get('gamma', 0.9)
+            )
+        else:
+            self.scheduler = optim.lr_scheduler.ReduceLROnPlateau(
+                self.optimizer, mode='min', factor=0.5, patience=500
+            )
+        
         self.train_losses = []
         self.val_losses = []
         self.energy_losses = []
@@ -129,6 +164,10 @@ class HNNTrainer:
             
             total_loss.backward()
             self.optimizer.step()
+            
+            # Step scheduler if available
+            if self.scheduler:
+                self.scheduler.step()
             
             # Validation
             self.model.eval()

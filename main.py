@@ -24,7 +24,7 @@ from models.pinn import PINN, PINNTrainer
 from models.hnn import HNN, HNNTrainer, prepare_hnn_data
 from regression.symbolic_regression import SymbolicRegression
 from validation.compare_long_term import LongTermValidator
-from config import NN_CONFIG, HNN_CONFIG
+from config import NN_CONFIG, HNN_CONFIG, PINN_CONFIG, SYMBOLIC_CONFIG, DATA_CONFIG, VALIDATION_CONFIG, SYSTEMS, EXPERIMENT_CONFIG, PATHS
 
 class PhysicsAISafetyPipeline:
     """Complete pipeline for AI Safety and Physics project"""
@@ -78,8 +78,18 @@ class PhysicsAISafetyPipeline:
             
             # Train Baseline NN
             print("Training Baseline Neural Network...")
-            baseline_model = BaselineNN(hidden_layers=NN_CONFIG['hidden_layers'])
-            baseline_trainer = BaselineTrainer(baseline_model, lr=NN_CONFIG['learning_rate'])
+            baseline_model = BaselineNN(
+                hidden_layers=NN_CONFIG['hidden_layers'],
+                activation=NN_CONFIG['activation']
+            )
+            baseline_trainer = BaselineTrainer(
+                baseline_model, 
+                lr=NN_CONFIG['learning_rate'],
+                optimizer_type=NN_CONFIG['optimizer'],
+                weight_decay=NN_CONFIG['weight_decay'],
+                scheduler_type=NN_CONFIG['scheduler'],
+                scheduler_params=NN_CONFIG['scheduler_params']
+            )
             baseline_trainer.train(data['t'].values, data['x'].values, 
                                  epochs=NN_CONFIG['epochs'], val_split=NN_CONFIG['val_split'])
             baseline_trainer.save_model(f'baseline_nn_{system}')
@@ -87,8 +97,19 @@ class PhysicsAISafetyPipeline:
             
             # Train PINN
             print("Training Physics-Informed Neural Network...")
-            pinn_model = PINN(hidden_layers=NN_CONFIG['hidden_layers'])
-            pinn_trainer = PINNTrainer(pinn_model, lr=NN_CONFIG['learning_rate'], physics_weight=1.0)
+            pinn_model = PINN(
+                hidden_layers=PINN_CONFIG['hidden_layers'],
+                activation=PINN_CONFIG['activation']
+            )
+            pinn_trainer = PINNTrainer(
+                pinn_model, 
+                lr=NN_CONFIG['learning_rate'], 
+                physics_weight=PINN_CONFIG['physics_weight'],
+                optimizer_type=PINN_CONFIG['optimizer'],
+                weight_decay=NN_CONFIG['weight_decay'],
+                scheduler_type=PINN_CONFIG['scheduler'],
+                scheduler_params=PINN_CONFIG['scheduler_params']
+            )
             pinn_trainer.train(data['t'].values, data['x'].values, 
                              epochs=NN_CONFIG['epochs'], val_split=NN_CONFIG['val_split'], system=system)
             pinn_trainer.save_model(f'pinn_{system}')
@@ -103,8 +124,23 @@ class PhysicsAISafetyPipeline:
                 q, p, dq_dt, dp_dt = prepare_hnn_data(data['t'].values, 
                                                       data['theta'].values, data['omega'].values)
             
-            hnn_model = HNN(hidden_layers=NN_CONFIG['hidden_layers'])
-            hnn_trainer = HNNTrainer(hnn_model, lr=HNN_CONFIG['learning_rate'], energy_weight=HNN_CONFIG['energy_weight'])
+            hnn_model = HNN(
+                hidden_layers=HNN_CONFIG['hidden_layers'],
+                activation=HNN_CONFIG['activation'],
+                normalize_inputs=HNN_CONFIG['normalize_inputs']
+            )
+            # Set normalization if enabled
+            if HNN_CONFIG['normalize_inputs']:
+                hnn_model.set_normalization(q, p)
+            hnn_trainer = HNNTrainer(
+                hnn_model, 
+                lr=HNN_CONFIG['learning_rate'], 
+                energy_weight=HNN_CONFIG['energy_weight'],
+                optimizer_type=HNN_CONFIG['optimizer'],
+                weight_decay=HNN_CONFIG['weight_decay'],
+                scheduler_type=HNN_CONFIG['scheduler'],
+                scheduler_params=HNN_CONFIG['scheduler_params']
+            )
             hnn_trainer.train(q, p, dq_dt, dp_dt, epochs=HNN_CONFIG['epochs'], val_split=NN_CONFIG['val_split'])
             hnn_trainer.save_model(f'hnn_{system}')
             hnn_trainer.plot_training()
@@ -127,15 +163,33 @@ class PhysicsAISafetyPipeline:
             from config import NN_CONFIG
             
             # Load trained models
-            baseline_model = BaselineNN(hidden_layers=NN_CONFIG['hidden_layers'])
+            baseline_model = BaselineNN(
+                hidden_layers=NN_CONFIG['hidden_layers'],
+                activation=NN_CONFIG['activation']
+            )
             baseline_trainer = BaselineTrainer(baseline_model)
             baseline_trainer.load_model(f'baseline_nn_{system}')
             
-            pinn_model = PINN(hidden_layers=NN_CONFIG['hidden_layers'])
+            pinn_model = PINN(
+                hidden_layers=PINN_CONFIG['hidden_layers'],
+                activation=PINN_CONFIG['activation']
+            )
             pinn_trainer = PINNTrainer(pinn_model)
             pinn_trainer.load_model(f'pinn_{system}')
             
-            hnn_model = HNN(hidden_layers=NN_CONFIG['hidden_layers'])
+            hnn_model = HNN(
+                hidden_layers=HNN_CONFIG['hidden_layers'],
+                activation=HNN_CONFIG['activation'],
+                normalize_inputs=HNN_CONFIG['normalize_inputs']
+            )
+            # Set normalization if enabled
+            if HNN_CONFIG['normalize_inputs']:
+                # Reload the normalization stats from training data
+                if system == 'damped_oscillator':
+                    q, p, _, _ = prepare_hnn_data(data['t'].values, data['x'].values, data['v'].values)
+                else:
+                    q, p, _, _ = prepare_hnn_data(data['t'].values, data['theta'].values, data['omega'].values)
+                hnn_model.set_normalization(q, p)
             hnn_trainer = HNNTrainer(hnn_model)
             hnn_trainer.load_model(f'hnn_{system}')
             
