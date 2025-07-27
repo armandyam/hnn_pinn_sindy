@@ -9,8 +9,7 @@ The project compares multiple neural network approaches:
 1. **Baseline Neural Network**: Standard neural network that fits data without physics constraints
 2. **Physics-Informed Neural Network (PINN)**: Incorporates physics constraints into the loss function
 3. **Hamiltonian Neural Network (HNN)**: Learns a Hamiltonian function and enforces energy conservation
-4. **Cascaded HNN**: Combined trajectory and HNN training
-5. **Sequential Cascaded HNN**: Two-stage training (trajectory first, then HNN)
+4. **Sequential Cascaded HNN**: Two-stage training (trajectory first, then HNN)
 
 ## Key Research Questions
 
@@ -46,14 +45,7 @@ The pipeline generates comprehensive visualizations to analyze model performance
 - **Shows**: Dynamics loss, energy conservation loss, total loss
 - **Key Metrics**: Energy variance, dynamics accuracy, convergence
 
-#### 4. Cascaded HNN Training
-![Cascaded HNN Training](plots/cascaded_hnn_training.png)
-- **File**: `plots/cascaded_hnn_training.png`
-- **Description**: Combined training curves for cascaded HNN
-- **Shows**: Trajectory loss, HNN loss, combined loss components
-- **Key Metrics**: Multi-component training dynamics
-
-#### 5. Sequential Cascaded HNN Training
+#### 4. Sequential Cascaded HNN Training
 ![Sequential Cascaded HNN Training](plots/sequential_cascaded_hnn_training.png)
 - **File**: `plots/sequential_cascaded_hnn_training.png`
 - **Description**: Two-stage training curves for sequential cascaded HNN
@@ -62,16 +54,16 @@ The pipeline generates comprehensive visualizations to analyze model performance
 
 ### Data and Validation Plots
 
-#### 6. Generated Data Visualization
+#### 5. Generated Data Visualization
 ![Damped Oscillator Data](plots/damped_oscillator_data.png)
-- **File**: `plots/{system}_data.png`
-- **Description**: Visualization of generated synthetic data
+- **File**: `plots/damped_oscillator_data.png`
+- **Description**: Visualization of generated synthetic data for the damped oscillator
 - **Shows**: Position vs time, velocity vs time, phase space
 - **Key Metrics**: Data quality, noise levels, sampling density
 
-#### 7. Long-term Comparison
+#### 6. Long-term Comparison
 ![Long-term Comparison](plots/long_term_comparison_damped_oscillator.png)
-- **File**: `plots/long_term_comparison_{system}.png`
+- **File**: `plots/long_term_comparison_damped_oscillator.png`
 - **Description**: Comprehensive long-term validation comparison
 - **Shows**: 
   - True system vs neural network predictions
@@ -80,18 +72,12 @@ The pipeline generates comprehensive visualizations to analyze model performance
   - Metrics comparison across models
 - **Key Metrics**: Long-term stability, energy conservation, prediction accuracy
 
-#### 8. Zoomed Comparison
+#### 7. Zoomed Comparison
 ![Zoomed Comparison](plots/zoomed_comparison_damped_oscillator.png)
-- **File**: `plots/zoomed_comparison_{system}.png`
+- **File**: `plots/zoomed_comparison_damped_oscillator.png`
 - **Description**: Detailed zoomed-in view of neural network predictions
 - **Shows**: Last 10% of trajectory with y-limits [-1.5, 1.5]
 - **Key Metrics**: Fine-grained prediction accuracy, detailed error analysis
-
-### System-Specific Plots
-
-The plots are generated for each physical system:
-- **Damped Harmonic Oscillator**: Linear, damped system
-- **Simple Pendulum**: Nonlinear, energy-conserving system
 
 ## Project Structure
 
@@ -102,7 +88,6 @@ apart_hamiltonian/
 │   ├── nn_baseline.py         # Baseline neural network
 │   ├── pinn.py                # Physics-Informed Neural Network
 │   ├── hnn.py                 # Hamiltonian Neural Network
-│   ├── cascaded_hnn.py        # Combined cascaded HNN
 │   └── sequential_cascaded_hnn.py # Sequential cascaded HNN
 ├── regression/
 │   └── symbolic_regression.py # PySINDy-based equation discovery
@@ -149,14 +134,14 @@ Or use the convenience script:
 source venv/bin/activate
 python main.py test
 ```
-This runs the complete pipeline with just the damped harmonic oscillator system.
+This runs the complete pipeline with the damped harmonic oscillator system.
 
 ### Full Pipeline
 ```bash
 source venv/bin/activate
 python main.py full
 ```
-This runs the complete pipeline with both damped oscillator and simple pendulum systems.
+This runs the complete pipeline with the damped oscillator system.
 
 ### Using the convenience script
 ```bash
@@ -180,7 +165,6 @@ source venv/bin/activate
 python models/nn_baseline.py
 python models/pinn.py
 python models/hnn.py
-python models/cascaded_hnn.py
 python models/sequential_cascaded_hnn.py
 ```
 
@@ -202,7 +186,6 @@ Or using the convenience script:
 ./activate.sh python models/nn_baseline.py
 ./activate.sh python models/pinn.py
 ./activate.sh python models/hnn.py
-./activate.sh python models/cascaded_hnn.py
 ./activate.sh python models/sequential_cascaded_hnn.py
 ./activate.sh python regression/symbolic_regression.py
 ./activate.sh python validation/compare_long_term.py
@@ -211,7 +194,7 @@ Or using the convenience script:
 ## Methodology
 
 ### Step 1: Data Generation
-- Generate synthetic data for damped harmonic oscillator and simple pendulum
+- Generate synthetic data for damped harmonic oscillator
 - Add noise and subsample to simulate real-world constraints
 - Save data to CSV files for training
 
@@ -219,7 +202,6 @@ Or using the convenience script:
 - **Baseline NN**: Standard regression network trained on position vs time
 - **PINN**: Incorporates physics constraints (second-order ODE form)
 - **HNN**: Learns Hamiltonian H(q,p) and enforces energy conservation
-- **Cascaded HNN**: Combined trajectory and HNN training
 - **Sequential Cascaded HNN**: Two-stage training (trajectory first, then HNN)
 
 ### Step 3: Symbolic Regression
@@ -232,17 +214,12 @@ Or using the convenience script:
 - Compare with true system dynamics
 - Analyze stability, energy conservation, and error growth
 
-## Systems Studied
+## System Studied
 
 ### Damped Harmonic Oscillator
 - **True Equation**: `ẍ + 0.1ẋ + x = 0`
 - **State Variables**: Position x, Velocity ẋ
-- **Characteristics**: Linear, damped, good for comparing conservation
-
-### Simple Pendulum
-- **True Equation**: `θ̈ + 0.1θ̇ + 9.81sin(θ) = 0`
-- **State Variables**: Angle θ, Angular velocity θ̇
-- **Characteristics**: Nonlinear, energy-conserving, ideal for HNN
+- **Characteristics**: Linear, damped, good for comparing conservation and stability
 
 ## Expected Results
 
@@ -250,20 +227,19 @@ Or using the convenience script:
 - **Baseline NN**: Likely to show energy drift and instability
 - **PINN**: Should show improved stability due to physics constraints
 - **HNN**: Should maintain energy conservation over long times
-- **Cascaded HNN**: Should combine benefits of trajectory and HNN approaches
 - **Sequential Cascaded HNN**: Should leverage two-stage learning for better performance
 
 ### Equation Discovery
 - **Baseline NN**: May discover spurious terms due to overfitting
 - **PINN**: Should find cleaner equations closer to true physics
 - **HNN**: Should discover equations that respect conservation laws
-- **Cascaded Models**: Should provide better interpretability through combined approaches
+- **Sequential Cascaded HNN**: Should provide better interpretability through staged learning
 
 ### Interpretability
 - HNN-based equations should be more interpretable and physically plausible
 - PINN should provide a good balance between accuracy and interpretability
 - Baseline NN may provide accurate short-term predictions but poor interpretability
-- Cascaded models should offer enhanced interpretability through multi-stage learning
+- Sequential cascaded model should offer enhanced interpretability through multi-stage learning
 
 ## Output Files
 
