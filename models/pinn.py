@@ -72,8 +72,10 @@ class PINNTrainer:
         self.physics_losses = []
     
     def compute_physics_loss(self, t: torch.Tensor, system: str = 'damped_oscillator') -> torch.Tensor:
-        """Compute physics-informed loss based on the system type"""
+        """Compute physics-based loss using automatic differentiation"""
         t.requires_grad_(True)
+        
+        # Forward pass
         x = self.model(t)
         
         # First derivative
@@ -83,15 +85,23 @@ class PINNTrainer:
         d2x_dt2 = torch.autograd.grad(dx_dt.sum(), t, create_graph=True)[0]
         
         if system == 'damped_oscillator':
+            # Import config parameters instead of hardcoding
+            from config import SYSTEMS
+            params = SYSTEMS['damped_oscillator']['parameters']
+            m, k, c = params['m'], params['k'], params['c']
+            
             # Physics constraint: m*ddx + c*dx + k*x = 0
             # For damped oscillator: ddot(x) + (c/m)*dot(x) + (k/m)*x = 0
-            m, k, c = 1.0, 1.0, 0.1  # Parameters from data generation
             physics_residual = d2x_dt2 + (c/m)*dx_dt + (k/m)*x
             return torch.mean(physics_residual**2)
         
         elif system == 'pendulum':
+            # Import config parameters instead of hardcoding
+            from config import SYSTEMS
+            params = SYSTEMS['pendulum']['parameters']
+            g, L, c = params['g'], params['L'], params['c']
+            
             # Physics constraint: ddot(theta) + (c/m)*dot(theta) + (g/L)*sin(theta) = 0
-            g, L, c = 9.81, 1.0, 0.1  # Parameters from data generation
             physics_residual = d2x_dt2 + c*dx_dt + (g/L)*torch.sin(x)
             return torch.mean(physics_residual**2)
         
@@ -115,9 +125,9 @@ class PINNTrainer:
         t_train, x_train = t_tensor[train_indices], x_tensor[train_indices]
         t_val, x_val = t_tensor[val_indices], x_tensor[val_indices]
         
-        # Early stopping parameters
+        # Early stopping parameters - MORE PATIENCE FOR PHYSICS CONVERGENCE
         best_val_loss = float('inf')
-        patience = 500  # Stop if no improvement for 500 epochs
+        patience = 5000  # Much higher patience for PINN physics convergence
         patience_counter = 0
         best_model_state = None
         
@@ -143,34 +153,38 @@ class PINNTrainer:
             if self.scheduler:
                 self.scheduler.step()
             
-            # Validation
+            # Validation - compute TOTAL validation loss (data + physics)
             self.model.eval()
             with torch.no_grad():
                 val_pred = self.model(t_val)
-                val_loss = nn.MSELoss()(val_pred, x_val)
+                val_data_loss = nn.MSELoss()(val_pred, x_val)
+            
+            # For physics loss, we need gradients enabled
+            val_physics_loss = self.compute_physics_loss(t_val, system)
+            val_total_loss = val_data_loss + self.physics_weight * val_physics_loss
             
             # Store losses
             self.train_losses.append(data_loss.item())
-            self.val_losses.append(val_loss.item())
+            self.val_losses.append(val_data_loss.item())  # Store data loss for plotting
             self.physics_losses.append(physics_loss.item())
             
-            # Early stopping check (use validation loss)
-            if val_loss.item() < best_val_loss:
-                best_val_loss = val_loss.item()
+            # Early stopping check (use TOTAL validation loss, not just data loss)
+            if val_total_loss.item() < best_val_loss:
+                best_val_loss = val_total_loss.item()
                 patience_counter = 0
                 best_model_state = self.model.state_dict().copy()
             else:
                 patience_counter += 1
             
-            # Stop if validation loss hasn't improved
+            # Stop if total validation loss hasn't improved
             if patience_counter >= patience:
-                print(f"Early stopping at epoch {epoch}, best val loss: {best_val_loss:.6f}")
+                print(f"Early stopping at epoch {epoch}, best total val loss: {best_val_loss:.6f}")
                 # Restore best model
                 self.model.load_state_dict(best_model_state)
                 break
             
             if verbose and epoch % 100 == 0:
-                print(f"Epoch {epoch}: Data Loss = {data_loss.item():.6f}, Physics Loss = {physics_loss.item():.6f}, Val Loss = {val_loss.item():.6f}")
+                print(f"Epoch {epoch}: Data Loss = {data_loss.item():.6f}, Physics Loss = {physics_loss.item():.6f}, Val Loss = {val_data_loss.item():.6f}")
     
     def predict(self, t: np.ndarray) -> np.ndarray:
         """Make predictions"""
@@ -218,7 +232,7 @@ class PINNTrainer:
         # Loss curves
         ax1.plot(self.train_losses, label='Data Loss', alpha=0.7)
         ax1.plot(self.val_losses, label='Validation Loss', alpha=0.7)
-        ax1.plot(self.physics_losses, label='Physics Loss', alpha=0.7)
+        # ax1.plot(self.physics_losses, label='Physics Loss', alpha=0.7)
         ax1.set_xlabel('Epoch')
         ax1.set_ylabel('Loss')
         ax1.set_title('PINN Training Curves')

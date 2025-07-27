@@ -32,45 +32,53 @@ NN_CONFIG = {
     }
 }
 
-# PINN Parameters
+# PINN Configuration  
 PINN_CONFIG = {
-    'hidden_layers': [64, 64],  # Simpler than before
-    'activation': 'tanh',
-    'physics_weight': 50.0,  # Much higher physics weight
-    'optimizer': 'adamw',
-    'scheduler': 'steplr',
-    'scheduler_params': {
-        'step_size': 1500,
-        'gamma': 0.7
-    },
-    'residual_points': 2000  # More physics constraints
-}
-
-# HNN Parameters
-HNN_CONFIG = {
-    'hidden_layers': [64, 32],  # Simpler architecture
-    'activation': 'tanh',
-    'learning_rate': 5e-4,  # Slightly lower LR for stability
+    'hidden_layers': [128, 64, 32],  # Match HNN architecture
+    'learning_rate': 1e-3,  # Match HNN learning rate
     'epochs': 8000,
     'batch_size': 64,
-    'energy_weight': 100.0,  # Much higher energy conservation weight
-    'weight_decay': 1e-3,
+    'physics_weight': 10.0,  # Reduced from 100.0 for better data/physics balance
+    'weight_decay': 1e-4,  # Match HNN regularization
+    'activation': 'tanh',  # Tanh for smooth derivatives
     'optimizer': 'adamw',
     'scheduler': 'steplr',
     'scheduler_params': {
-        'step_size': 1500,
-        'gamma': 0.7
+        'step_size': 1500,  # Match HNN scheduler
+        'gamma': 0.8
     },
-    'normalize_inputs': False  # Disable normalization for simplicity
+    'val_split': 0.2,
+    'residual_points': 3000  # More collocation points for better physics coverage
 }
 
-# Symbolic Regression Parameters
+# HNN Configuration
+HNN_CONFIG = {
+    'hidden_layers': [128, 64, 32],  # Deeper network for better Hamiltonian approximation
+    'learning_rate': 1e-3,  # Higher learning rate for faster convergence
+    'epochs': 8000,
+    'batch_size': 64,
+    'energy_weight': 10.0,  # Reduced weight to balance data and energy losses
+    'weight_decay': 1e-4,  # Slightly higher regularization
+    'activation': 'tanh',  # Tanh is good for Hamiltonian functions
+    'optimizer': 'adamw',
+    'scheduler': 'steplr',
+    'scheduler_params': {
+        'step_size': 1500,  # Decay learning rate every 1500 epochs
+        'gamma': 0.8  # More aggressive decay
+    },
+    'val_split': 0.2,
+    'normalize_inputs': True  # Enable normalization for better convergence
+}
+
+# Symbolic Regression Configuration
 SYMBOLIC_CONFIG = {
-    'max_degree': 2,  # Reduced complexity - focus on linear/quadratic terms
-    'threshold': 0.001,  # Lower threshold to allow more terms
-    'alpha': 0.001,  # Lower regularization for more terms
-    'max_iter': 50,  # More iterations for better convergence
-    'feature_names': ['x', 'dx_dt']
+    'library_type': 'polynomial',
+    'max_degree': 1,  # Reduced from 2 for simpler, more stable equations
+    'threshold': 0.01,  # Increased threshold for sparser equations
+    'alpha': 0.01,  # Increased regularization
+    'max_iter': 100,  # More iterations for better convergence
+    'feature_names': ['x', 'dx_dt'],
+    'normalize_columns': False  # Disable normalization for numerical stability
 }
 
 # Validation Parameters
