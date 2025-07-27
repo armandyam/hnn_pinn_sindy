@@ -323,10 +323,9 @@ class PhysicsAISafetyPipeline:
                 results = self.validator.compare_long_term_dynamics(
                     system, initial_conditions=(np.pi/4, 0.0))
             
-            # Plot results
+            # Generate plots
             self.validator.plot_long_term_comparison(system)
-            
-            # Print summary
+            self.validator.plot_zoomed_comparison(system)  # New zoomed plot
             self.validator.print_comparison_summary(system)
             
             print(f"Validation completed for {system}")

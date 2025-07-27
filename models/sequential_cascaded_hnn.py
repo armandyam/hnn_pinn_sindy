@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """
 Sequential Cascaded HNN: Train trajectory network first, then HNN component
-Two-stage training: Stage 1 (t -> x), Stage 2 (x,v -> H)
+Two-stage training: Stage 1 (t -> x), Stage 2 (x_learned,v_learned -> H)
 
 FIXES APPLIED:
 1. Stage 1 training now IDENTICAL to baseline NN:
@@ -15,6 +15,12 @@ FIXES APPLIED:
    - Fixed initial conditions (1.0, 0.0) instead of trajectory network prediction
    - Same integration and interpolation approach
    - Ensures fair comparison in long-term validation
+
+3. Stage 2 training now TRULY SEQUENTIAL:
+   - Uses Stage 1's learned trajectory (x_learned, v_learned) 
+   - NOT original data (x, v) from CSV
+   - Ensures HNN learns from the trajectory network's output
+   - Creates proper cascaded learning: t -> x_learned -> v_learned -> H
 """
 
 import torch
@@ -258,12 +264,12 @@ class SequentialCascadedHNNTrainer:
         
         print("✅ Stage 1 completed!")
     
-    def train_stage2(self, t: np.ndarray, x: np.ndarray, v: np.ndarray,
+    def train_stage2(self, t: np.ndarray,
                      epochs: int = 5000, val_split: float = 0.2, 
                      patience: int = 1000):
-        """Stage 2: Train HNN component (x,v -> H)"""
+        """Stage 2: Train HNN component using Stage 1's learned trajectory"""
         
-        print("🔥 STAGE 2: Training HNN Component (x,v → H)")
+        print("🔥 STAGE 2: Training HNN Component using Stage 1 Output")
         
         # Freeze trajectory network
         for param in self.model.trajectory_net.parameters():
@@ -273,9 +279,23 @@ class SequentialCascadedHNNTrainer:
         for param in self.model.hnn_net.parameters():
             param.requires_grad = True
         
-        # Prepare HNN data
+        # FIXED: Use Stage 1's learned trajectory instead of original data
+        t_tensor = torch.tensor(t, dtype=torch.float32, requires_grad=True)
+        
+        # Get learned trajectory from Stage 1
+        x_learned = self.model.trajectory_net(t_tensor.unsqueeze(-1)).squeeze(-1)
+        v_learned = torch.autograd.grad(x_learned.sum(), t_tensor, create_graph=True)[0]
+        
+        # Convert to numpy for data preparation
+        x_learned_np = x_learned.detach().numpy()
+        v_learned_np = v_learned.detach().numpy()
+        
+        # Prepare HNN data using Stage 1's learned trajectory
         from utils.data_utils import prepare_hnn_data
-        q, p, dq_dt, dp_dt = prepare_hnn_data(t, x, v)
+        q, p, dq_dt, dp_dt = prepare_hnn_data(t, x_learned_np, v_learned_np)
+        
+        print(f"Stage 2: Using Stage 1's learned trajectory (x_learned, v_learned)")
+        print(f"Stage 2: {len(q)} total samples from learned trajectory")
         
         # Convert to tensors
         q_tensor = torch.tensor(q, dtype=torch.float32)
@@ -374,7 +394,7 @@ class SequentialCascadedHNNTrainer:
         self.train_stage1(t, x, stage1_epochs, val_split, patience)
         
         # Stage 2: Train HNN component
-        self.train_stage2(t, x, v, stage2_epochs, val_split, patience)
+        self.train_stage2(t, stage2_epochs, val_split, patience)
         
         print("✅ Sequential training completed!")
         

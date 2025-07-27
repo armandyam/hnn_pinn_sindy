@@ -4,11 +4,13 @@ This project implements a comprehensive pipeline for comparing different neural 
 
 ## Project Overview
 
-The project compares three neural network approaches:
+The project compares multiple neural network approaches:
 
 1. **Baseline Neural Network**: Standard neural network that fits data without physics constraints
 2. **Physics-Informed Neural Network (PINN)**: Incorporates physics constraints into the loss function
 3. **Hamiltonian Neural Network (HNN)**: Learns a Hamiltonian function and enforces energy conservation
+4. **Cascaded HNN**: Combined trajectory and HNN training
+5. **Sequential Cascaded HNN**: Two-stage training (trajectory first, then HNN)
 
 ## Key Research Questions
 
@@ -16,6 +18,80 @@ The project compares three neural network approaches:
 - Which approach yields the most interpretable discovered equations?
 - Do physics-informed models lead to better symbolic regression results?
 - How does energy conservation affect equation discovery?
+
+## Generated Visualizations
+
+The pipeline generates comprehensive visualizations to analyze model performance and training dynamics:
+
+### Training Plots
+
+#### 1. Baseline Neural Network Training
+![Baseline NN Training](plots/baseline_nn_training.png)
+- **File**: `plots/baseline_nn_training.png`
+- **Description**: Training and validation loss curves for the baseline neural network
+- **Shows**: Learning progress, overfitting detection, convergence behavior
+- **Key Metrics**: Train/validation loss over epochs
+
+#### 2. PINN Training
+![PINN Training](plots/pinn_training.png)
+- **File**: `plots/pinn_training.png`
+- **Description**: Training curves for Physics-Informed Neural Network
+- **Shows**: Combined loss (data + physics), individual loss components
+- **Key Metrics**: Data loss, physics loss, total loss over training
+
+#### 3. HNN Training
+![HNN Training](plots/hnn_training.png)
+- **File**: `plots/hnn_training.png`
+- **Description**: Training curves for Hamiltonian Neural Network
+- **Shows**: Dynamics loss, energy conservation loss, total loss
+- **Key Metrics**: Energy variance, dynamics accuracy, convergence
+
+#### 4. Cascaded HNN Training
+![Cascaded HNN Training](plots/cascaded_hnn_training.png)
+- **File**: `plots/cascaded_hnn_training.png`
+- **Description**: Combined training curves for cascaded HNN
+- **Shows**: Trajectory loss, HNN loss, combined loss components
+- **Key Metrics**: Multi-component training dynamics
+
+#### 5. Sequential Cascaded HNN Training
+![Sequential Cascaded HNN Training](plots/sequential_cascaded_hnn_training.png)
+- **File**: `plots/sequential_cascaded_hnn_training.png`
+- **Description**: Two-stage training curves for sequential cascaded HNN
+- **Shows**: Stage 1 (trajectory) and Stage 2 (HNN) training separately
+- **Key Metrics**: Stage-wise convergence, cascaded learning effectiveness
+
+### Data and Validation Plots
+
+#### 6. Generated Data Visualization
+![Damped Oscillator Data](plots/damped_oscillator_data.png)
+- **File**: `plots/{system}_data.png`
+- **Description**: Visualization of generated synthetic data
+- **Shows**: Position vs time, velocity vs time, phase space
+- **Key Metrics**: Data quality, noise levels, sampling density
+
+#### 7. Long-term Comparison
+![Long-term Comparison](plots/long_term_comparison_damped_oscillator.png)
+- **File**: `plots/long_term_comparison_{system}.png`
+- **Description**: Comprehensive long-term validation comparison
+- **Shows**: 
+  - True system vs neural network predictions
+  - RMSE error bars for each model
+  - Energy conservation check
+  - Metrics comparison across models
+- **Key Metrics**: Long-term stability, energy conservation, prediction accuracy
+
+#### 8. Zoomed Comparison
+![Zoomed Comparison](plots/zoomed_comparison_damped_oscillator.png)
+- **File**: `plots/zoomed_comparison_{system}.png`
+- **Description**: Detailed zoomed-in view of neural network predictions
+- **Shows**: Last 10% of trajectory with y-limits [-1.5, 1.5]
+- **Key Metrics**: Fine-grained prediction accuracy, detailed error analysis
+
+### System-Specific Plots
+
+The plots are generated for each physical system:
+- **Damped Harmonic Oscillator**: Linear, damped system
+- **Simple Pendulum**: Nonlinear, energy-conserving system
 
 ## Project Structure
 
@@ -25,13 +101,16 @@ apart_hamiltonian/
 ├── models/
 │   ├── nn_baseline.py         # Baseline neural network
 │   ├── pinn.py                # Physics-Informed Neural Network
-│   └── hnn.py                 # Hamiltonian Neural Network
+│   ├── hnn.py                 # Hamiltonian Neural Network
+│   ├── cascaded_hnn.py        # Combined cascaded HNN
+│   └── sequential_cascaded_hnn.py # Sequential cascaded HNN
 ├── regression/
 │   └── symbolic_regression.py # PySINDy-based equation discovery
 ├── validation/
 │   └── compare_long_term.py   # Long-term dynamics comparison
 ├── main.py                    # Complete pipeline execution
 ├── requirements.txt           # Dependencies
+├── plots/                     # Generated visualizations
 └── README.md                 # This file
 ```
 
@@ -101,6 +180,8 @@ source venv/bin/activate
 python models/nn_baseline.py
 python models/pinn.py
 python models/hnn.py
+python models/cascaded_hnn.py
+python models/sequential_cascaded_hnn.py
 ```
 
 3. **Symbolic Regression**:
@@ -121,6 +202,8 @@ Or using the convenience script:
 ./activate.sh python models/nn_baseline.py
 ./activate.sh python models/pinn.py
 ./activate.sh python models/hnn.py
+./activate.sh python models/cascaded_hnn.py
+./activate.sh python models/sequential_cascaded_hnn.py
 ./activate.sh python regression/symbolic_regression.py
 ./activate.sh python validation/compare_long_term.py
 ```
@@ -136,6 +219,8 @@ Or using the convenience script:
 - **Baseline NN**: Standard regression network trained on position vs time
 - **PINN**: Incorporates physics constraints (second-order ODE form)
 - **HNN**: Learns Hamiltonian H(q,p) and enforces energy conservation
+- **Cascaded HNN**: Combined trajectory and HNN training
+- **Sequential Cascaded HNN**: Two-stage training (trajectory first, then HNN)
 
 ### Step 3: Symbolic Regression
 - Use PySINDy to extract explicit equations from neural network predictions
@@ -165,16 +250,20 @@ Or using the convenience script:
 - **Baseline NN**: Likely to show energy drift and instability
 - **PINN**: Should show improved stability due to physics constraints
 - **HNN**: Should maintain energy conservation over long times
+- **Cascaded HNN**: Should combine benefits of trajectory and HNN approaches
+- **Sequential Cascaded HNN**: Should leverage two-stage learning for better performance
 
 ### Equation Discovery
 - **Baseline NN**: May discover spurious terms due to overfitting
 - **PINN**: Should find cleaner equations closer to true physics
 - **HNN**: Should discover equations that respect conservation laws
+- **Cascaded Models**: Should provide better interpretability through combined approaches
 
 ### Interpretability
 - HNN-based equations should be more interpretable and physically plausible
 - PINN should provide a good balance between accuracy and interpretability
 - Baseline NN may provide accurate short-term predictions but poor interpretability
+- Cascaded models should offer enhanced interpretability through multi-stage learning
 
 ## Output Files
 
@@ -191,6 +280,8 @@ The pipeline generates several output directories:
 2. **Energy Variance**: Measure of energy conservation
 3. **Equation Complexity**: Number of terms in discovered equations
 4. **Long-term Stability**: Error growth over extended time periods
+5. **Training Convergence**: Loss curves and early stopping behavior
+6. **Stage-wise Performance**: For cascaded models, performance at each stage
 
 ## Dependencies
 

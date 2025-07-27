@@ -350,6 +350,66 @@ class LongTermValidator:
         
         plt.show()
     
+    def plot_zoomed_comparison(self, system: str = 'damped_oscillator', 
+                              save_plot: bool = True):
+        """Plot zoomed-in comparison of neural network predictions vs true system"""
+        
+        if system not in self.results:
+            print(f"No results available for {system}")
+            return
+        
+        results = self.results[system]
+        t_true = results['true_trajectory']['t']
+        x_true = results['true_trajectory']['x']
+        
+        # Calculate zoom region (last 10% of time range)
+        t_start = t_true[int(0.9 * len(t_true))]  # Start at 90% of time range
+        t_end = t_true[-1]  # End at 100% of time range
+        
+        # Create zoomed plot
+        fig, ax = plt.subplots(1, 1, figsize=(12, 8))
+        colors = ['blue', 'red', 'green', 'purple', 'orange']
+        
+        # Plot true system
+        ax.plot(t_true, x_true, color='black', linewidth=3, label='True System', alpha=0.9)
+        
+        # Plot neural network predictions
+        for i, (name, pred) in enumerate(results['predictions'].items()):
+            ax.plot(pred['t'], pred['x'], color=colors[i], linestyle='--', 
+                   label=f'{name.upper()}', alpha=0.8, linewidth=2)
+        
+        # Set zoom limits
+        ax.set_xlim(t_start, t_end)
+        ax.set_ylim(-1.5, 1.5)
+        
+        # Customize plot
+        ax.set_xlabel('Time', fontsize=14)
+        ax.set_ylabel('Position (x)', fontsize=14)
+        ax.set_title(f'Zoomed Comparison: {system.replace("_", " ").title()}\n'
+                    f'Last 10% of Time Range ({t_start:.1f} - {t_end:.1f})', 
+                    fontsize=16, fontweight='bold')
+        ax.grid(True, alpha=0.3)
+        ax.legend(fontsize=12, loc='upper right')
+        
+        # Add text box with statistics
+        stats_text = f"Time Range: {t_start:.1f} - {t_end:.1f}\n"
+        stats_text += f"Y-axis: [-1.5, 1.5]\n"
+        stats_text += f"Zoom: Last 10% of trajectory"
+        
+        ax.text(0.02, 0.98, stats_text, transform=ax.transAxes, 
+               fontsize=10, verticalalignment='top',
+               bbox=dict(boxstyle='round', facecolor='wheat', alpha=0.8))
+        
+        plt.tight_layout()
+        
+        if save_plot:
+            plot_path = f'plots/zoomed_comparison_{system}.png'
+            plt.savefig(plot_path, dpi=300, bbox_inches='tight')
+            print(f"Zoomed comparison plot saved: {plot_path}")
+        
+        plt.show()
+        plt.close()
+    
     def print_comparison_summary(self, system: str = 'damped_oscillator'):
         """Print summary of comparison results"""
         
@@ -391,6 +451,7 @@ def main():
     print("=== Damped Harmonic Oscillator ===")
     validator.compare_long_term_dynamics('damped_oscillator')  # Uses config values now
     validator.plot_long_term_comparison('damped_oscillator')
+    validator.plot_zoomed_comparison('damped_oscillator')  # New zoomed plot
     validator.print_comparison_summary('damped_oscillator')
     
     # Compare pendulum using config values  
@@ -399,7 +460,10 @@ def main():
     validator.compare_long_term_dynamics('pendulum', 
                                        initial_conditions=(np.pi/4, 0.0))  # Pendulum-specific IC
     validator.plot_long_term_comparison('pendulum')
+    validator.plot_zoomed_comparison('pendulum')  # New zoomed plot
     validator.print_comparison_summary('pendulum')
+    
+    print("\n✅ Validation complete! Check plots/ directory for results.")
 
 if __name__ == "__main__":
     main() 
