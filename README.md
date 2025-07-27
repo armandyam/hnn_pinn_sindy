@@ -103,7 +103,7 @@ apart_hamiltonian/
 
 1. Clone the repository:
 ```bash
-git clone <repository-url>
+git clone https://github.com/armandyam/hnn_pinn_sindy
 cd apart_hamiltonian
 ```
 
@@ -129,24 +129,16 @@ Or use the convenience script:
 
 ## Usage
 
-### Quick Test (Recommended for first run)
+### Full Test 
 ```bash
 source venv/bin/activate
 python main.py test
 ```
 This runs the complete pipeline with the damped harmonic oscillator system.
 
-### Full Pipeline
-```bash
-source venv/bin/activate
-python main.py full
-```
-This runs the complete pipeline with the damped oscillator system.
-
 ### Using the convenience script
 ```bash
 ./activate.sh python main.py test
-./activate.sh python main.py full
 ```
 
 ### Individual Steps
@@ -204,12 +196,7 @@ Or using the convenience script:
 - **HNN**: Learns Hamiltonian H(q,p) and enforces energy conservation
 - **Sequential Cascaded HNN**: Two-stage training (trajectory first, then HNN)
 
-### Step 3: Symbolic Regression
-- Use PySINDy to extract explicit equations from neural network predictions
-- Compare discovered equations with true physics
-- Analyze interpretability and accuracy
-
-### Step 4: Long-term Validation
+### Step 3: Long-term Validation
 - Integrate discovered equations forward in time
 - Compare with true system dynamics
 - Analyze stability, energy conservation, and error growth
@@ -229,11 +216,6 @@ Or using the convenience script:
 - **HNN**: Should maintain energy conservation over long times
 - **Sequential Cascaded HNN**: Should leverage two-stage learning for better performance
 
-### Equation Discovery
-- **Baseline NN**: May discover spurious terms due to overfitting
-- **PINN**: Should find cleaner equations closer to true physics
-- **HNN**: Should discover equations that respect conservation laws
-- **Sequential Cascaded HNN**: Should provide better interpretability through staged learning
 
 ### Interpretability
 - HNN-based equations should be more interpretable and physically plausible
@@ -273,20 +255,12 @@ This project is designed for research in AI safety and physics. Contributions ar
 
 - Additional physical systems
 - New neural network architectures
-- Improved symbolic regression methods
 - Enhanced validation metrics
+- Generalization of system based on Hamiltonian
 
 ## License
 
 [Add your license information here]
-
-## Citation
-
-If you use this code in your research, please cite:
-
-```bibtex
-[Add citation information when published]
-```
 
 ## Contact
 
