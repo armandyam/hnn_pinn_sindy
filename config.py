@@ -57,7 +57,7 @@ HNN_CONFIG = {
     'learning_rate': 5e-4,  # Lower learning rate for stability
     'epochs': 10000,  # More training for convergence
     'batch_size': 32,  # Smaller batch size for better gradients
-    'energy_weight': 1.0,  # Lower energy weight to balance with data fitting
+    'energy_weight': 10.0,  # Lower energy weight to balance with data fitting
     'weight_decay': 1e-3,  # Higher regularization for smoothness
     'activation': 'tanh',  # Tanh for smooth Hamiltonian functions
     'optimizer': 'adamw',
@@ -73,7 +73,7 @@ HNN_CONFIG = {
 # Symbolic Regression Configuration
 SYMBOLIC_CONFIG = {
     'library_type': 'polynomial',
-    'max_degree': 1,  # Reduced from 2 for simpler, more stable equations
+    'max_degree': 3,  # Reduced from 2 for simpler, more stable equations
     'threshold': 0.01,  # Increased threshold for sparser equations
     'alpha': 0.01,  # Increased regularization
     'max_iter': 100,  # More iterations for better convergence
