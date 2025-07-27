@@ -31,43 +31,55 @@ class SymbolicRegression:
                      d2x_dt2: Optional[np.ndarray] = None) -> Tuple[np.ndarray, List[str], np.ndarray]:
         """Prepare and clean data for SINDy fitting - NO SCALING for stability"""
         
+        # Convert to numpy arrays and ensure proper shapes
+        t = np.array(t).flatten()
+        x = np.array(x).flatten()
+        dx_dt = np.array(dx_dt).flatten()
+        d2x_dt2 = np.array(d2x_dt2).flatten()
+        
+        # Ensure all arrays have the same length
+        min_len = min(len(t), len(x), len(dx_dt), len(d2x_dt2))
+        t = t[:min_len]
+        x = x[:min_len]
+        dx_dt = dx_dt[:min_len]
+        d2x_dt2 = d2x_dt2[:min_len]
+        
+        # Remove NaN and infinite values
+        finite_mask = np.isfinite(t) & np.isfinite(x) & np.isfinite(dx_dt) & np.isfinite(d2x_dt2)
+        
         # Create feature matrix
         feature_names = ['x', 'dx_dt']
         X = np.column_stack([x, dx_dt])
         
-        # Remove NaN and Inf values
-        finite_mask = np.isfinite(X).all(axis=1)
-        if d2x_dt2 is not None:
-            finite_mask &= np.isfinite(d2x_dt2)
+        # Remove outliers using IQR method on X (features only)
+        Q1_X = np.percentile(X, 25, axis=0)
+        Q3_X = np.percentile(X, 75, axis=0)
+        IQR_X = Q3_X - Q1_X
+        outlier_mask_X = np.all((X >= Q1_X - 1.5 * IQR_X) & (X <= Q3_X + 1.5 * IQR_X), axis=1)
         
-        X = X[finite_mask]
+        # Combine all masks
+        final_mask = finite_mask & outlier_mask_X
+        
+        X = X[final_mask]
         if d2x_dt2 is not None:
-            d2x_dt2 = d2x_dt2[finite_mask]
-        t = t[finite_mask]
+            d2x_dt2 = d2x_dt2[final_mask]
+        t = t[final_mask]
+        
+        # Ensure time array is sorted for SINDy
+        sort_indices = np.argsort(t)
+        t = t[sort_indices]
+        X = X[sort_indices]
+        if d2x_dt2 is not None:
+            d2x_dt2 = d2x_dt2[sort_indices]
         
         print(f"📊 Data preparation: {len(X)} points after cleaning")
         
-        # Outlier removal (keep this for robustness)
-        for i in range(X.shape[1]):
-            mean_val = np.mean(X[:, i])
-            std_val = np.std(X[:, i])
-            if std_val > 1e-10:  # Avoid division by zero
-                mask = np.abs(X[:, i] - mean_val) < 3 * std_val
-                X = X[mask]
-                if d2x_dt2 is not None:
-                    d2x_dt2 = d2x_dt2[mask]
-                t = t[mask]
+        # Create feature names for SINDy
+        feature_names = ['x', 'dx_dt']
         
-        # Ensure we have enough data points
-        if len(X) < 20:
-            print(f"⚠️ Warning: Only {len(X)} data points after cleaning")
-            return None, None, None
+        print("✅ Using unscaled features for numerical stability")
         
-        # NO SCALING - use raw features for stability during integration
-        print(f"✅ Using unscaled features for numerical stability")
-        self.scaler = None  # Disable scaler
-        
-        return X, feature_names, t
+        return X, feature_names, d2x_dt2
 
     def fit_sindymodel(self, X: np.ndarray, y: np.ndarray, t: Optional[np.ndarray] = None):
         """Fit SINDy model with improved numerical stability"""

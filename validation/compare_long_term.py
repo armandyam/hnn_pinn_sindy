@@ -9,8 +9,13 @@ sys.path.append('..')
 
 from models.nn_baseline import BaselineTrainer, BaselineNN
 from models.pinn import PINNTrainer, PINN
-from models.hnn import HNNTrainer, HNN, prepare_hnn_data
+from models.hnn import HNN, HNNTrainer
+from models.cascaded_hnn import CascadedHNN, CascadedHNNTrainer
+from models.sequential_cascaded_hnn import SequentialCascadedHNN, SequentialCascadedHNNTrainer
 from regression.symbolic_regression import SymbolicRegression
+from config import (NN_CONFIG, PINN_CONFIG, HNN_CONFIG, CASCADED_HNN_CONFIG, 
+                   SEQUENTIAL_CASCADED_HNN_CONFIG, SYSTEMS)
+from utils.data_utils import prepare_hnn_data
 
 class LongTermValidator:
     """Validate and compare long-term dynamics of different models"""
@@ -24,7 +29,6 @@ class LongTermValidator:
     
     def load_trained_models(self, system: str):
         """Load trained models"""
-        from config import NN_CONFIG, PINN_CONFIG, HNN_CONFIG
         
         # Load baseline model
         baseline_model = BaselineNN(
@@ -53,19 +57,40 @@ class LongTermValidator:
             # Reload training data to get normalization stats
             data = pd.read_csv(f'data/{system}.csv')
             if system == 'damped_oscillator':
-                from main import prepare_hnn_data
                 q, p, _, _ = prepare_hnn_data(data['t'].values, data['x'].values, data['v'].values)
             else:
-                from main import prepare_hnn_data
                 q, p, _, _ = prepare_hnn_data(data['t'].values, data['theta'].values, data['omega'].values)
             hnn_model.set_normalization(q, p)
         hnn_trainer = HNNTrainer(hnn_model)
         hnn_trainer.load_model(f'hnn_{system}')
         
+        # Load Cascaded HNN
+        cascaded_model = CascadedHNN(
+            trajectory_config=CASCADED_HNN_CONFIG['trajectory_net'],
+            hnn_config=CASCADED_HNN_CONFIG['hnn_net']
+        )
+        cascaded_trainer = CascadedHNNTrainer(cascaded_model)
+        cascaded_trainer.load_model(f'cascaded_hnn_{system}')
+        
+        # Load Sequential Cascaded HNN
+        sequential_cascaded_model = SequentialCascadedHNN(
+            trajectory_config=SEQUENTIAL_CASCADED_HNN_CONFIG['trajectory_net'],
+            hnn_config=SEQUENTIAL_CASCADED_HNN_CONFIG['hnn_net']
+        )
+        sequential_cascaded_trainer = SequentialCascadedHNNTrainer(
+            sequential_cascaded_model,
+            trajectory_config=SEQUENTIAL_CASCADED_HNN_CONFIG['trajectory_net'],
+            hnn_config=SEQUENTIAL_CASCADED_HNN_CONFIG['hnn_net'],
+            energy_weight=SEQUENTIAL_CASCADED_HNN_CONFIG['training']['energy_weight']
+        )
+        sequential_cascaded_trainer.load_model(f'sequential_cascaded_hnn_{system}')
+        
         return {
             'baseline_nn': baseline_trainer,
-            'pinn': pinn_trainer, 
-            'hnn': hnn_trainer
+            'pinn': pinn_trainer,
+            'hnn': hnn_trainer,
+            'cascaded_hnn': cascaded_trainer,
+            'sequential_cascaded_hnn': sequential_cascaded_trainer
         }
     
     def integrate_true_system(self, t_span: Tuple[float, float], 
@@ -75,7 +100,6 @@ class LongTermValidator:
         
         if system == 'damped_oscillator':
             # Use config parameters for consistency
-            from config import SYSTEMS
             params = SYSTEMS['damped_oscillator']['parameters']
             m, k, c = params['m'], params['k'], params['c']
             
@@ -189,17 +213,41 @@ class LongTermValidator:
         equations = {}
         
         for name, trainer in models.items():
+            # Extract symbolic equations using derivatives
             if name == 'hnn':
-                # For HNN, we need to get derivatives from the learned dynamics
-                q, p, dq_dt, dp_dt = prepare_hnn_data(data['t'].values, data['x'].values, data['v'].values)
-                # Use finite differences for second derivative
-                d2q_dt2 = np.gradient(dq_dt, data['t'].values[1]-data['t'].values[0])
-            else:
-                # Get derivatives from neural network
+                # For HNN, get derivatives directly
                 x, dx_dt, d2x_dt2 = trainer.get_derivatives(data['t'].values, order=2)
                 q, p, dq_dt, dp_dt = x, dx_dt, dx_dt, d2x_dt2
+                d2q_dt2 = d2x_dt2
+            elif name in ['cascaded_hnn', 'sequential_cascaded_hnn']:
+                # For cascaded models, get derivatives from the model
+                try:
+                    x, dx_dt, d2x_dt2 = trainer.get_derivatives(data['t'].values, order=2)
+                    q, p, dq_dt, dp_dt = x, dx_dt, dx_dt, d2x_dt2
+                    d2q_dt2 = d2x_dt2
+                except Exception:
+                    # Fallback to numerical derivatives
+                    q, p, dq_dt, dp_dt = prepare_hnn_data(data['t'].values, data['x'].values, data['v'].values)
+                    if len(dq_dt) > 2:
+                        d2q_dt2 = np.gradient(dq_dt.flatten(), data['t'].values[1]-data['t'].values[0])
+                    else:
+                        d2q_dt2 = np.zeros_like(dq_dt.flatten())
+                    d2q_dt2 = d2q_dt2.reshape(-1, 1)
+            else:
+                # For other models, compute derivatives numerically
+                q, p, dq_dt, dp_dt = prepare_hnn_data(data['t'].values, data['x'].values, data['v'].values)
+                if len(dq_dt) > 2:
+                    d2q_dt2 = np.gradient(dq_dt.flatten(), data['t'].values[1]-data['t'].values[0])
+                else:
+                    d2q_dt2 = np.zeros_like(dq_dt.flatten())
+                d2q_dt2 = d2q_dt2.reshape(-1, 1)
             
-            eq_data = sr.extract_equations_from_nn(data['t'].values, q, dq_dt, d2x_dt2, f'{name}_{system}')
+            # Ensure all arrays have consistent shapes
+            q = q.reshape(-1, 1) if q.ndim == 1 else q
+            dq_dt = dq_dt.reshape(-1, 1) if dq_dt.ndim == 1 else dq_dt
+            d2q_dt2 = d2q_dt2.reshape(-1, 1) if d2q_dt2.ndim == 1 else d2q_dt2
+            
+            eq_data = sr.extract_equations_from_nn(data['t'].values, q, dq_dt, d2q_dt2, f'{name}_{system}')
             equations[name] = eq_data
         
         # Long-term validation using discovered equations - HONEST EVALUATION
@@ -281,7 +329,7 @@ class LongTermValidator:
         
         axes[0, 0].plot(t_true, x_true, 'k-', label='True', linewidth=2)
         
-        colors = ['b', 'r', 'g']
+        colors = ['b', 'r', 'g', 'm', 'y']  # Added for sequential_cascaded_hnn
         for i, (name, pred) in enumerate(results['predictions'].items()):
             axes[0, 0].plot(pred['t'], pred['x'], f'{colors[i]}-', 
                            label=name.upper(), alpha=0.7, linewidth=1.5)

@@ -30,44 +30,18 @@ from data_generation import PhysicsDataGenerator
 from models.nn_baseline import BaselineNN, BaselineTrainer
 from models.pinn import PINN, PINNTrainer
 from models.hnn import HNN, HNNTrainer
+from models.cascaded_hnn import CascadedHNN, CascadedHNNTrainer
+from models.sequential_cascaded_hnn import SequentialCascadedHNN, SequentialCascadedHNNTrainer
 from regression.symbolic_regression import SymbolicRegression
 from validation.compare_long_term import LongTermValidator
+from utils.data_utils import prepare_hnn_data
 
 # Import all config variables
 from config import (
-    NN_CONFIG, PINN_CONFIG, HNN_CONFIG, SYMBOLIC_CONFIG, 
-    DATA_CONFIG, VALIDATION_CONFIG, SYSTEMS, 
+    NN_CONFIG, PINN_CONFIG, HNN_CONFIG, CASCADED_HNN_CONFIG, SEQUENTIAL_CASCADED_HNN_CONFIG,
+    SYMBOLIC_CONFIG, DATA_CONFIG, VALIDATION_CONFIG, SYSTEMS, 
     EXPERIMENT_CONFIG, PATHS
 )
-
-def prepare_hnn_data(t: np.ndarray, x: np.ndarray, v: np.ndarray) -> tuple:
-    """Prepare data for HNN training with correct physics"""
-    # For harmonic oscillator: q = position, p = velocity (not momentum for simplicity)
-    q = x.reshape(-1, 1)
-    p = v.reshape(-1, 1)  # treating velocity as generalized momentum
-    
-    # For a harmonic oscillator, the dynamics are:
-    # dq_dt = p (velocity)
-    # dp_dt = -k*q (acceleration = -k*position, with k=1 and m=1)
-    
-    # Use the known physics instead of noisy numerical differentiation
-    dq_dt = v.reshape(-1, 1)  # dq/dt = velocity
-    
-    # For undamped harmonic oscillator: dp_dt = acceleration = -k*q = -q (since k=1)
-    from config import SYSTEMS
-    params = SYSTEMS['damped_oscillator']['parameters']
-    k = params['k']
-    m = params['m'] 
-    c = params['c']
-    
-    # dp_dt = acceleration = -(k/m)*q - (c/m)*p
-    dp_dt = -(k/m) * q - (c/m) * p
-    
-    print(f"🔧 HNN Data: Using physics-based derivatives (k={k}, m={m}, c={c})")
-    print(f"   - dq_dt = velocity (direct)")
-    print(f"   - dp_dt = -(k/m)*q - (c/m)*p = -k*q (since c=0)")
-    
-    return q, p, dq_dt, dp_dt
 
 class PhysicsAISafetyPipeline:
     """Complete pipeline for AI Safety and Physics project"""
@@ -188,6 +162,54 @@ class PhysicsAISafetyPipeline:
             hnn_trainer.save_model(f'hnn_{system}')
             hnn_trainer.plot_training()
             
+            # Train Cascaded HNN
+            print("Training Cascaded HNN...")
+            cascaded_model = CascadedHNN(
+                trajectory_config=CASCADED_HNN_CONFIG['trajectory_net'],
+                hnn_config=CASCADED_HNN_CONFIG['hnn_net']
+            )
+            cascaded_trainer = CascadedHNNTrainer(
+                cascaded_model,
+                trajectory_weight=CASCADED_HNN_CONFIG['training']['trajectory_weight'],
+                hnn_weight=CASCADED_HNN_CONFIG['training']['hnn_weight'],
+                energy_weight=CASCADED_HNN_CONFIG['training']['energy_weight'],
+                learning_rate=CASCADED_HNN_CONFIG['trajectory_net']['learning_rate'],
+                optimizer_type=CASCADED_HNN_CONFIG['trajectory_net']['optimizer'],
+                weight_decay=CASCADED_HNN_CONFIG['trajectory_net']['weight_decay'],
+                scheduler_type=CASCADED_HNN_CONFIG['trajectory_net']['scheduler'],
+                scheduler_params=CASCADED_HNN_CONFIG['trajectory_net']['scheduler_params']
+            )
+            cascaded_trainer.train(
+                data['t'].values, data['x'].values, data['v'].values,
+                epochs=CASCADED_HNN_CONFIG['training']['epochs'],
+                val_split=CASCADED_HNN_CONFIG['training']['val_split'],
+                patience=CASCADED_HNN_CONFIG['training']['patience']
+            )
+            cascaded_trainer.save_model(f'cascaded_hnn_{system}')
+            cascaded_trainer.plot_training()
+            
+            # Train Sequential Cascaded HNN
+            print("Training Sequential Cascaded HNN...")
+            sequential_cascaded_model = SequentialCascadedHNN(
+                trajectory_config=SEQUENTIAL_CASCADED_HNN_CONFIG['trajectory_net'],
+                hnn_config=SEQUENTIAL_CASCADED_HNN_CONFIG['hnn_net']
+            )
+            sequential_cascaded_trainer = SequentialCascadedHNNTrainer(
+                sequential_cascaded_model,
+                trajectory_config=SEQUENTIAL_CASCADED_HNN_CONFIG['trajectory_net'],
+                hnn_config=SEQUENTIAL_CASCADED_HNN_CONFIG['hnn_net'],
+                energy_weight=SEQUENTIAL_CASCADED_HNN_CONFIG['training']['energy_weight']
+            )
+            sequential_cascaded_trainer.train(
+                data['t'].values, data['x'].values, data['v'].values,
+                stage1_epochs=SEQUENTIAL_CASCADED_HNN_CONFIG['training']['stage1_epochs'],
+                stage2_epochs=SEQUENTIAL_CASCADED_HNN_CONFIG['training']['stage2_epochs'],
+                val_split=SEQUENTIAL_CASCADED_HNN_CONFIG['training']['val_split'],
+                patience=SEQUENTIAL_CASCADED_HNN_CONFIG['training']['patience']
+            )
+            sequential_cascaded_trainer.save_model(f'sequential_cascaded_hnn_{system}')
+            sequential_cascaded_trainer.plot_training()
+            
             print(f"Model training completed for {system}")
     
     def step3_symbolic_regression(self, systems: List[str] = ['damped_oscillator', 'pendulum']):
@@ -203,7 +225,7 @@ class PhysicsAISafetyPipeline:
             data = pd.read_csv(f'data/{system}.csv')
             
             # Load config for neural network parameters
-            from config import NN_CONFIG
+            from config import NN_CONFIG, SEQUENTIAL_CASCADED_HNN_CONFIG
             
             # Load trained models
             baseline_model = BaselineNN(
@@ -236,11 +258,34 @@ class PhysicsAISafetyPipeline:
             hnn_trainer = HNNTrainer(hnn_model)
             hnn_trainer.load_model(f'hnn_{system}')
             
+            # Load cascaded HNN
+            cascaded_model = CascadedHNN(
+                trajectory_config=CASCADED_HNN_CONFIG['trajectory_net'],
+                hnn_config=CASCADED_HNN_CONFIG['hnn_net']
+            )
+            cascaded_trainer = CascadedHNNTrainer(cascaded_model)
+            cascaded_trainer.load_model(f'cascaded_hnn_{system}')
+            
+            # Load Sequential Cascaded HNN
+            sequential_cascaded_model = SequentialCascadedHNN(
+                trajectory_config=SEQUENTIAL_CASCADED_HNN_CONFIG['trajectory_net'],
+                hnn_config=SEQUENTIAL_CASCADED_HNN_CONFIG['hnn_net']
+            )
+            sequential_cascaded_trainer = SequentialCascadedHNNTrainer(
+                sequential_cascaded_model,
+                trajectory_config=SEQUENTIAL_CASCADED_HNN_CONFIG['trajectory_net'],
+                hnn_config=SEQUENTIAL_CASCADED_HNN_CONFIG['hnn_net'],
+                energy_weight=SEQUENTIAL_CASCADED_HNN_CONFIG['training']['energy_weight']
+            )
+            sequential_cascaded_trainer.load_model(f'sequential_cascaded_hnn_{system}')
+            
             # Extract equations from each model
             models = {
                 'baseline_nn': baseline_trainer,
                 'pinn': pinn_trainer,
-                'hnn': hnn_trainer
+                'hnn': hnn_trainer,
+                'cascaded_hnn': cascaded_trainer,
+                'sequential_cascaded_hnn': sequential_cascaded_trainer
             }
             
             equations = {}

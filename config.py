@@ -70,10 +70,72 @@ HNN_CONFIG = {
     'normalize_inputs': True  # Keep normalization for better training
 }
 
+# Cascaded HNN Configuration - OPTIMIZED ARCHITECTURES (Combined Training)
+CASCADED_HNN_CONFIG = {
+    'trajectory_net': {
+        'hidden_layers': [256, 128, 64],  # LARGER for better trajectory learning
+        'activation': 'tanh',
+        'learning_rate': 5e-4,  # SLOWER for stability
+        'weight_decay': 1e-4,  # LESS regularization
+        'optimizer': 'adamw',
+        'scheduler': 'steplr',
+        'scheduler_params': {'step_size': 2000, 'gamma': 0.8}
+    },
+    'hnn_net': {
+        'hidden_layers': [64, 64],  # SMALLER and simpler HNN
+        'activation': 'tanh',
+        'normalize_inputs': False,  # DISABLE normalization for simplicity
+        'learning_rate': 1e-3,  # FASTER HNN learning
+        'weight_decay': 1e-4,
+        'optimizer': 'adamw',
+        'scheduler': 'steplr',
+        'scheduler_params': {'step_size': 2000, 'gamma': 0.8}
+    },
+    'training': {
+        'epochs': 10000,  # MORE epochs
+        'batch_size': 32,  # SMALLER batches for better gradients
+        'val_split': 0.2,
+        'patience': 3000,  # MORE patience
+        'trajectory_weight': 5.0,  # HIGHER trajectory weight
+        'hnn_weight': 0.5,  # LOWER HNN weight initially
+        'energy_weight': 0.05  # LOWER energy weight
+    }
+}
+
+# Sequential Cascaded HNN Configuration - EXACT MATCH TO NN AND HNN
+SEQUENTIAL_CASCADED_HNN_CONFIG = {
+    'trajectory_net': {
+        'hidden_layers': [64, 32],  # EXACT SAME AS NN_CONFIG
+        'activation': 'tanh',  # EXACT SAME AS NN_CONFIG
+        'learning_rate': 1e-3,  # EXACT SAME AS NN_CONFIG
+        'weight_decay': 1e-3,  # EXACT SAME AS NN_CONFIG
+        'optimizer': 'adamw',  # EXACT SAME AS NN_CONFIG
+        'scheduler': 'steplr',  # EXACT SAME AS NN_CONFIG
+        'scheduler_params': {'step_size': 1500, 'gamma': 0.7}  # EXACT SAME AS NN_CONFIG
+    },
+    'hnn_net': {
+        'hidden_layers': [128, 64],  # EXACT SAME AS HNN_CONFIG
+        'activation': 'tanh',  # EXACT SAME AS HNN_CONFIG
+        'normalize_inputs': False,  # EXACT SAME AS HNN_CONFIG
+        'learning_rate': 1e-3,  # EXACT SAME AS HNN_CONFIG
+        'weight_decay': 1e-4,  # EXACT SAME AS HNN_CONFIG
+        'optimizer': 'adamw',  # EXACT SAME AS HNN_CONFIG
+        'scheduler': 'steplr',  # EXACT SAME AS HNN_CONFIG
+        'scheduler_params': {'step_size': 1000, 'gamma': 0.8}  # EXACT SAME AS HNN_CONFIG
+    },
+    'training': {
+        'stage1_epochs': 8000,  # EXACT SAME AS NN_CONFIG epochs
+        'stage2_epochs': 8000,  # EXACT SAME AS HNN_CONFIG epochs
+        'val_split': 0.2,  # EXACT SAME AS NN_CONFIG
+        'patience': 5000,  # EXACT SAME AS NN_CONFIG for trajectory
+        'energy_weight': 0.1  # EXACT SAME AS HNN_CONFIG
+    }
+}
+
 # Symbolic Regression Configuration
 SYMBOLIC_CONFIG = {
     'library_type': 'polynomial',
-    'max_degree': 3,  # Reduced from 2 for simpler, more stable equations
+    'max_degree': 1,  # Reduced from 2 for simpler, more stable equations
     'threshold': 0.01,  # Increased threshold for sparser equations
     'alpha': 0.01,  # Increased regularization
     'max_iter': 100,  # More iterations for better convergence
