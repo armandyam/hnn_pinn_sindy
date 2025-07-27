@@ -260,8 +260,5 @@ This project is designed for research in AI safety and physics. Contributions ar
 
 ## License
 
-[Add your license information here]
-
-## Contact
-
-[Add contact information] 
+Copyright (c) 2025 Jeyashree Krishnan and Ajay Mandyam Rangarajan
+All rights reserved.
