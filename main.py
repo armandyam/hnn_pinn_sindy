@@ -306,7 +306,7 @@ class PhysicsAISafetyPipeline:
             print(f"Symbolic regression completed for {system}")
     
     def step4_validation(self, systems: List[str] = ['damped_oscillator', 'pendulum']):
-        """Step 4: Long-term validation and comparison"""
+        """Step 4: Long-term validation and comparison - FIXED to use VALIDATION_CONFIG"""
         print("\n" + "=" * 50)
         print("STEP 4: LONG-TERM VALIDATION")
         print("=" * 50)
@@ -314,15 +314,14 @@ class PhysicsAISafetyPipeline:
         for system in systems:
             print(f"\nValidating long-term dynamics for {system}...")
             
-            # Set initial conditions based on system
+            # Use VALIDATION_CONFIG for consistency
             if system == 'damped_oscillator':
-                initial_conditions = (1.0, 0.0)
+                # Use config default initial conditions
+                results = self.validator.compare_long_term_dynamics(system)
             else:  # pendulum
-                initial_conditions = (np.pi/4, 0.0)
-            
-            # Run comparison
-            results = self.validator.compare_long_term_dynamics(
-                system, t_span=(0, 100), initial_conditions=initial_conditions)
+                # Override initial conditions for pendulum while using config t_span
+                results = self.validator.compare_long_term_dynamics(
+                    system, initial_conditions=(np.pi/4, 0.0))
             
             # Plot results
             self.validator.plot_long_term_comparison(system)

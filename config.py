@@ -145,7 +145,7 @@ SYMBOLIC_CONFIG = {
 
 # Validation Parameters
 VALIDATION_CONFIG = {
-    't_span': (0, 50),  # Shorter validation period
+    't_span': (0, 100),  # Shorter validation period
     'n_points': 5000,
     'initial_conditions': [(1.0, 0.0)]  # Single condition for cleaner analysis
 }
